@@ -1,0 +1,6 @@
+{
+  "name": "Doodle Bureau: Dusk Arena",
+  "description": "Fast-paced 2D side-scrolling arena shooter inspired by Mini Militia with stylized caricature politicians, jetpack combat, smart AI bots, 2-player local multiplayer, and persistent IndexedDB player profiles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
