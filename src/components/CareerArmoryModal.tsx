@@ -6,6 +6,7 @@ import {
   Crosshair,
   Flame,
   Lock,
+  Palette,
   Shirt,
   Sparkles,
   Swords,
@@ -15,6 +16,7 @@ import {
 import {
   ACHIEVEMENTS,
   FLAME_COSMETICS,
+  GUN_WRAPS,
   MELEE_WEAPON_LIST,
   OUTFIT_COSMETICS,
   SECONDARY_WEAPON_COSMETICS,
@@ -32,10 +34,10 @@ import {
   getFavoriteWeapon,
   unlockOrEquipCosmetic,
 } from '../db/playerDb';
-import { PlayerProfile, WeaponId, WeaponMasteryTier } from '../types/game';
+import { GunWrapId, PlayerProfile, WeaponId, WeaponMasteryTier } from '../types/game';
 import { CaricatureAvatar } from './CaricatureAvatar';
 
-export type CareerArmoryTab = 'career' | 'challenges' | 'flames' | 'outfits' | 'weapons';
+export type CareerArmoryTab = 'career' | 'challenges' | 'flames' | 'outfits' | 'wraps' | 'weapons';
 
 interface CareerArmoryModalProps {
   profile: PlayerProfile;
@@ -87,7 +89,7 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
   };
 
   const handleCosmeticAction = async (
-    category: 'flame' | 'outfit' | 'weapon' | 'secondary' | 'melee',
+    category: 'flame' | 'outfit' | 'weapon' | 'secondary' | 'melee' | 'wrap',
     itemId: string
   ) => {
     setFeedback(null);
@@ -213,6 +215,17 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
               Suit Outfits
             </button>
             <button
+              onClick={() => setTab('wraps')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                tab === 'wraps'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <Palette className="h-3.5 w-3.5" />
+              Gun Wraps
+            </button>
+            <button
               onClick={() => setTab('weapons')}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
                 tab === 'weapons'
@@ -221,7 +234,7 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
               }`}
             >
               <Crosshair className="h-3.5 w-3.5" />
-              Weapons & Mastery
+              Weapons &amp; Mastery
             </button>
           </div>
 
@@ -565,6 +578,97 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {tab === 'wraps' && (
+            <div className="space-y-4">
+              <div className="text-xs text-slate-400">
+                Equip custom Gun Wraps across all firearms in both the 3D Lobby and 2D Arena. Select
+                &ldquo;Factory Issue&rdquo; to display per-weapon Mastery camos instead.
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {GUN_WRAPS.map((wrap) => {
+                  const unlocked = (profile.cosmetics.unlockedWraps || ['none']).includes(wrap.id);
+                  const equipped = (profile.cosmetics.equippedWrap || 'none') === wrap.id;
+                  const wrapBg: Record<GunWrapId, React.CSSProperties> = {
+                    none: {
+                      background: `linear-gradient(135deg, ${wrap.primaryColor}, ${wrap.secondaryColor})`,
+                    },
+                    carbon_fiber: {
+                      backgroundColor: '#18181B',
+                      backgroundImage:
+                        'repeating-linear-gradient(45deg, #27272A 0 4px, #18181B 4px 8px)',
+                    },
+                    lava_magma: {
+                      background:
+                        'radial-gradient(circle at 30% 30%, #FACC15, #EA580C 45%, #450A0A 90%)',
+                    },
+                    electric_ice: {
+                      background:
+                        'linear-gradient(135deg, #075985 0%, #38BDF8 50%, #E0F2FE 100%)',
+                    },
+                    comic_halftone: {
+                      backgroundColor: '#FACC15',
+                      backgroundImage: 'radial-gradient(#EC4899 22%, transparent 24%)',
+                      backgroundSize: '8px 8px',
+                    },
+                    royal_gold: {
+                      background:
+                        'linear-gradient(135deg, #92400E 0%, #FDE047 50%, #D97706 100%)',
+                    },
+                    galaxy_void: {
+                      background:
+                        'radial-gradient(circle at 70% 25%, #E879F9, #4C1D95 50%, #0F172A 95%)',
+                    },
+                  };
+
+                  return (
+                    <div
+                      key={wrap.id}
+                      className={`flex items-center justify-between gap-3 rounded-lg border p-3.5 ${
+                        equipped
+                          ? 'border-cyan-400 bg-cyan-500/10'
+                          : 'border-slate-800 bg-slate-900/60'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="h-11 w-14 rounded-lg border border-slate-600 shrink-0 shadow-inner"
+                          style={wrapBg[wrap.id]}
+                        />
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-white truncate">
+                            {wrap.name}
+                          </div>
+                          <div className="text-xs text-slate-400">{wrap.description}</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleCosmeticAction('wrap', wrap.id)}
+                        disabled={equipped}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
+                          equipped
+                            ? 'bg-emerald-500/20 text-emerald-300 cursor-default'
+                            : unlocked
+                            ? 'bg-slate-800 text-white hover:bg-slate-700'
+                            : 'bg-amber-500 text-slate-950 hover:bg-amber-400'
+                        }`}
+                      >
+                        {equipped ? (
+                          <span className="flex items-center gap-1">
+                            <Check className="h-3.5 w-3.5" /> Equipped
+                          </span>
+                        ) : unlocked ? (
+                          'Equip'
+                        ) : (
+                          `${wrap.cost} Coins`
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

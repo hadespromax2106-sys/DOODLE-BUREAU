@@ -7,9 +7,11 @@ import { ArenaRenderer } from '../game/renderer';
 import {
   BarrelEntity,
   CameraState,
+  CookerBombEntity,
   DestructibleWallEntity,
   FighterEntity,
   FloatingText,
+  GeometryBeamEntity,
   GrenadeEntity,
   Particle,
   PickupEntity,
@@ -17,6 +19,7 @@ import {
   ProjectileEntity,
   SmokeCloudEntity,
   TempWallEntity,
+  WeaponDropEntity,
 } from '../game/types';
 import { MatchReplayData } from '../types/game';
 
@@ -131,10 +134,12 @@ export const KillCamOverlay: React.FC<KillCamOverlayProps> = ({ replay, onComple
           secondaryAmmo: 15,
           meleeWeaponId: fs?.meleeWeaponId ?? 'knife',
           weaponMastery: fs?.weaponMastery || meta.weaponMastery || 'none',
+          gunWrap: fs?.gunWrap || meta.gunWrap || 'none',
           ammo: 30,
           isReloading: false,
           reloadTimerMs: 0,
           fireCooldownMs: 0,
+          minigunSpinTimer: 0,
           burstRemaining: 0,
           burstTimerMs: 0,
           recoilKick: 0,
@@ -167,6 +172,15 @@ export const KillCamOverlay: React.FC<KillCamOverlayProps> = ({ replay, onComple
           inPodium: false,
           speechText: fs?.speechText ?? '',
           speechTimer: fs?.speechTimer ?? 0,
+          stunTimer: fs?.stunTimer ?? 0,
+          danceTimer: fs?.danceTimer ?? 0,
+          freezeTimer: fs?.freezeTimer ?? 0,
+          empDisableTimer: fs?.empDisableTimer ?? 0,
+          empDotTimer: 0,
+          empTickAccum: 0,
+          empOwnerId: null,
+          slamPending: false,
+          gossipCooldown: 0,
           kills: fs?.kills ?? 0,
           deaths: fs?.deaths ?? 0,
           damageDealt: 0,
@@ -258,6 +272,25 @@ export const KillCamOverlay: React.FC<KillCamOverlayProps> = ({ replay, onComple
         vy: -30,
       }));
 
+      const cookerBombs: CookerBombEntity[] = (fState.cookerBombs || []).map((cb) => ({
+        ...cb,
+        ownerId: '',
+        vx: 0,
+        vy: 0,
+        whistleTimer: 0,
+      }));
+      const geometryBeams: GeometryBeamEntity[] = (fState.geometryBeams || []).map((bm) => ({
+        ...bm,
+        ownerId: '',
+      }));
+      const weaponDrops: WeaponDropEntity[] = (fState.weaponDrops || []).map((wd) => ({
+        ...wd,
+        vx: 0,
+        vy: 0,
+        maxLife: 24,
+        bobPhase: 0,
+      }));
+
       renderer.renderFrame(
         ctx,
         canvas.width,
@@ -275,7 +308,7 @@ export const KillCamOverlay: React.FC<KillCamOverlayProps> = ({ replay, onComple
         [],
         fState.elapsedSec,
         powerUps,
-        { map, grenades, smokeClouds }
+        { map, grenades, cookerBombs, geometryBeams, smokeClouds, weaponDrops }
       );
 
       rafId = requestAnimationFrame(loop);

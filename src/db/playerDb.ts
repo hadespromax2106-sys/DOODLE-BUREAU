@@ -4,8 +4,10 @@ import {
   CHARACTERS,
   DEFAULT_FREE_CHARACTERS,
   FLAME_COSMETICS,
+  GUN_WRAPS,
   MELEE_WEAPONS,
   OUTFIT_COSMETICS,
+  PROMO_CODES,
   SECONDARY_WEAPON_COSMETICS,
   STARTING_WEAPON_COSMETICS,
   WEAPON_MASTERY_TIERS,
@@ -13,7 +15,9 @@ import {
   getRankForXp,
   getTodayDateKey,
   normalizeCharacterId,
+  normalizeGunWrapId,
   normalizeMeleeId,
+  normalizeOutfitId,
   normalizeSecondaryId,
   normalizeWeaponId,
 } from '../data/catalog';
@@ -24,6 +28,7 @@ import {
   FighterMatchTelemetry,
   FlameColorId,
   FriendEntry,
+  GunWrapId,
   MeleeWeaponId,
   OutfitId,
   PlayerMatchReward,
@@ -52,6 +57,12 @@ export function createEmptyWeaponKills(): Record<WeaponId, number> {
     dlp44: 0,
     awq: 0,
     bomberier: 0,
+    plasma_repeater: 0,
+    boomstick: 0,
+    minigun: 0,
+    crossbow_launcher: 0,
+    freeze_ray: 0,
+    orbital_laser: 0,
     pistol: 0,
     ghost_pistol: 0,
     uzi: 0,
@@ -181,44 +192,44 @@ export function getSampleAiRivals(): FriendEntry[] {
   const baseTs = 1700000000000;
   return [
     {
-      id: 'rival_veto_01',
-      playerTag: 'Bot_Veto#7104',
-      username: 'Bot_Veto',
+      id: 'rival_voltage_01',
+      playerTag: 'Bot_Voltage#7104',
+      username: 'Bot_Voltage',
       rankTitle: 'Senator',
-      characterId: 'tariff_boss',
+      characterId: 'baron_voltage',
       outfitId: 'navy',
       status: 'online',
       isAiRival: true,
       addedAt: baseTs + 1,
     },
     {
-      id: 'rival_caucus_02',
-      playerTag: 'Bot_Caucus#4492',
-      username: 'Bot_Caucus',
+      id: 'rival_wifi_02',
+      playerTag: 'Bot_WiFi#4492',
+      username: 'Bot_WiFi',
       rankTitle: 'Minister',
-      characterId: 'yogi_boy',
+      characterId: 'baba_wifi',
       outfitId: 'sovereign',
       status: 'online',
       isAiRival: true,
       addedAt: baseTs + 2,
     },
     {
-      id: 'rival_envoy_03',
-      playerTag: 'Bot_Envoy#8831',
-      username: 'Bot_Envoy',
+      id: 'rival_chappal_03',
+      playerTag: 'Bot_Chappal#8831',
+      username: 'Bot_Chappal',
       rankTitle: 'Councilor',
-      characterId: 'dashing_trudeau',
+      characterId: 'chappal_ninja',
       outfitId: 'burgundy',
       status: 'in_match',
       isAiRival: true,
       addedAt: baseTs + 3,
     },
     {
-      id: 'rival_auditor_04',
-      playerTag: 'Bot_Auditor#2059',
-      username: 'Bot_Auditor',
+      id: 'rival_404_04',
+      playerTag: 'Bot_404#2059',
+      username: 'Bot_404',
       rankTitle: 'Prime Commander',
-      characterId: 'iron_bear',
+      characterId: 'agent_404',
       outfitId: 'stealth',
       status: 'offline',
       isAiRival: true,
@@ -384,7 +395,7 @@ function normalizeProfile(raw: Partial<PlayerProfile>): PlayerProfile {
     playerTag,
     pinHash: String(raw.pinHash || ''),
     avatarId: normalizeCharacterId(raw.avatarId),
-    tagline: String(raw.tagline || 'Ready for parliamentary combat.').slice(0, 60),
+    tagline: String(raw.tagline || 'Ready for arena combat.').slice(0, 60),
     xp: Math.max(0, Number(raw.xp) || 0),
     coins: Math.max(0, Number(raw.coins) || 0),
     stats: {
@@ -433,15 +444,24 @@ function normalizeProfile(raw: Partial<PlayerProfile>): PlayerProfile {
         new Set<CharacterId>([
           ...DEFAULT_FREE_CHARACTERS,
           ...(Array.isArray(raw.cosmetics?.unlockedCharacters)
-            ? raw.cosmetics!.unlockedCharacters
+            ? raw.cosmetics!.unlockedCharacters.map((c) => normalizeCharacterId(c))
+            : []),
+        ])
+      ),
+      unlockedWraps: Array.from(
+        new Set<GunWrapId>([
+          'none',
+          ...(Array.isArray(raw.cosmetics?.unlockedWraps)
+            ? raw.cosmetics!.unlockedWraps.map((w) => normalizeGunWrapId(w))
             : []),
         ])
       ),
       equippedFlame: (raw.cosmetics?.equippedFlame || 'amber') as FlameColorId,
-      equippedOutfit: (raw.cosmetics?.equippedOutfit || 'charcoal') as OutfitId,
+      equippedOutfit: normalizeOutfitId(raw.cosmetics?.equippedOutfit),
       equippedStartingWeapon: normalizeWeaponId(raw.cosmetics?.equippedStartingWeapon),
       equippedSecondary: normalizeSecondaryId(raw.cosmetics?.equippedSecondary),
       equippedMelee: normalizeMeleeId(raw.cosmetics?.equippedMelee),
+      equippedWrap: normalizeGunWrapId(raw.cosmetics?.equippedWrap),
     },
     masteryEquipped: { ...(raw.masteryEquipped || {}) },
     careerCounters: {
@@ -454,6 +474,7 @@ function normalizeProfile(raw: Partial<PlayerProfile>): PlayerProfile {
     dailyChallenges: buildDailyChallengesForToday(raw.dailyChallenges),
     friends: Array.isArray(raw.friends) ? [...raw.friends] : [],
     friendRequests: Array.isArray(raw.friendRequests) ? [...raw.friendRequests] : [],
+    redeemedCodes: Array.isArray(raw.redeemedCodes) ? [...raw.redeemedCodes] : [],
     createdAt: Number(raw.createdAt) || Date.now(),
     lastPlayedAt: Number(raw.lastPlayedAt) || Date.now(),
   };
@@ -494,7 +515,7 @@ export async function registerProfile(params: {
     playerTag: formatPlayerTag(cleanName, disc),
     pinHash,
     avatarId: params.avatarId,
-    tagline: params.tagline.trim() || 'Veto first, ask later.',
+    tagline: params.tagline.trim() || 'Chai first, ask later.',
     xp: 0,
     coins: 75,
     stats: {
@@ -538,7 +559,7 @@ export async function loginProfile(
 
 export function createGuestProfile(
   slot: 1 | 2,
-  avatarId: CharacterId = slot === 1 ? 'mitron' : 'tariff_boss',
+  avatarId: CharacterId = slot === 1 ? 'chai_storm' : 'baron_voltage',
   customName?: string,
   blockedNames: string[] = []
 ): PlayerProfile {
@@ -573,11 +594,13 @@ export function createGuestProfile(
       unlockedSecondaries: ['pistol'],
       unlockedMelees: ['knife'],
       unlockedCharacters: [...DEFAULT_FREE_CHARACTERS],
+      unlockedWraps: ['none'],
       equippedFlame: 'amber',
       equippedOutfit: 'charcoal',
       equippedStartingWeapon: 'ak',
       equippedSecondary: 'pistol',
       equippedMelee: 'knife',
+      equippedWrap: 'none',
     },
     masteryEquipped: {},
     careerCounters: createEmptyCareerCounters(),
@@ -593,7 +616,7 @@ export function createGuestProfile(
 
 export async function createUniqueGuestProfile(
   slot: 1 | 2,
-  avatarId: CharacterId = slot === 1 ? 'mitron' : 'tariff_boss',
+  avatarId: CharacterId = slot === 1 ? 'chai_storm' : 'baron_voltage',
   customName?: string,
   blockedNames: string[] = []
 ): Promise<PlayerProfile> {
@@ -617,7 +640,8 @@ export async function recordMatchForProfile(
     matchData.kills * 30 +
     (matchData.won ? 120 : 40) +
     Math.max(0, matchData.kills - matchData.deaths) * 10;
-  let coinsEarned = matchData.kills * 18 + (matchData.won ? 80 : 25);
+  const nemesisRevengeCoins = Math.max(0, Number(matchData.telemetry?.nemesisRevengeCoins) || 0);
+  let coinsEarned = matchData.kills * 18 + (matchData.won ? 80 : 25) + nemesisRevengeCoins;
 
   const prevXp = profile.xp;
   const newXp = prevXp + baseXpEarned;
@@ -637,6 +661,9 @@ export async function recordMatchForProfile(
         won: matchData.won,
         xpEarned: baseXpEarned,
         coinsEarned,
+        nemesisRevengeCoins,
+        nemesisKills: matchData.telemetry?.nemesisKills || 0,
+        afterlifeKills: matchData.telemetry?.afterlifeKills || 0,
         prevXp,
         newXp,
         prevRank,
@@ -745,6 +772,9 @@ export async function recordMatchForProfile(
       won: matchData.won,
       xpEarned: baseXpEarned,
       coinsEarned,
+      nemesisRevengeCoins,
+      nemesisKills: matchData.telemetry?.nemesisKills || 0,
+      afterlifeKills: matchData.telemetry?.afterlifeKills || 0,
       prevXp,
       newXp: updated.xp,
       prevRank: getRankForXp(prevXp),
@@ -782,7 +812,7 @@ export async function equipWeaponMasterySkin(
 
 export async function unlockOrEquipCosmetic(
   profileId: string,
-  category: 'flame' | 'outfit' | 'weapon' | 'secondary' | 'melee',
+  category: 'flame' | 'outfit' | 'weapon' | 'secondary' | 'melee' | 'wrap',
   itemId: string
 ): Promise<{ ok: true; profile: PlayerProfile } | { ok: false; error: string }> {
   const profile = await getProfileById(profileId);
@@ -844,6 +874,26 @@ export async function unlockOrEquipCosmetic(
     }
     profile.cosmetics.unlockedMelees = Array.from(new Set(list));
     profile.cosmetics.equippedMelee = id;
+  } else if (category === 'wrap') {
+    const id = itemId as GunWrapId;
+    const item = GUN_WRAPS.find((w) => w.id === id);
+    if (!item) return { ok: false, error: 'Unknown gun wrap.' };
+    const list = profile.cosmetics.unlockedWraps || ['none'];
+    if (!list.includes(id)) {
+      if (id === 'golden_kettle') {
+        return {
+          ok: false,
+          error: 'Golden Kettle is exclusive to promo code CHAI2026. Enter it in Redeem Code above!',
+        };
+      }
+      if (profile.coins < item.cost) {
+        return { ok: false, error: `Need ${item.cost} coins to unlock ${item.name}.` };
+      }
+      profile.coins -= item.cost;
+      list.push(id);
+    }
+    profile.cosmetics.unlockedWraps = Array.from(new Set(list));
+    profile.cosmetics.equippedWrap = id;
   } else {
     const id = itemId as WeaponId;
     const item = STARTING_WEAPON_COSMETICS.find((i) => i.id === id);
@@ -1078,7 +1128,7 @@ export async function sendFriendRequestByTag(
       id: `fr_out_${Date.now()}`,
       fromTag: cleanTag,
       fromUsername: namePart,
-      fromCharacterId: 'mitron',
+      fromCharacterId: 'chai_storm',
       fromRankTitle: 'Operative',
       direction: 'outgoing',
       createdAt: Date.now(),
@@ -1163,5 +1213,63 @@ export async function removeFriendByTag(
     (f) => f.playerTag.toLowerCase() !== playerTag.toLowerCase()
   );
   return putProfile({ ...latest, friends });
+}
+
+export async function redeemPromoCode(
+  profileId: string,
+  rawCode: string
+): Promise<
+  | { ok: true; profile: PlayerProfile; message: string }
+  | { ok: false; error: string }
+> {
+  const code = rawCode.trim().toUpperCase();
+  if (!code) {
+    return { ok: false, error: 'Enter a promo code first.' };
+  }
+  const profile = await getProfileById(profileId);
+  if (!profile || profile.isGuest) {
+    return { ok: false, error: 'Sign in or register a profile to redeem promo codes.' };
+  }
+  const latest = normalizeProfile(profile);
+  const redeemed = new Set((latest.redeemedCodes || []).map((c) => c.toUpperCase()));
+  if (redeemed.has(code)) {
+    return { ok: false, error: `Code ${code} has already been redeemed on this profile.` };
+  }
+
+  if (code === PROMO_CODES.DOODLE100.code) {
+    redeemed.add(code);
+    const saved = await putProfile({
+      ...latest,
+      coins: latest.coins + PROMO_CODES.DOODLE100.coins,
+      redeemedCodes: Array.from(redeemed),
+    });
+    return {
+      ok: true,
+      profile: saved,
+      message: 'Code DOODLE100 redeemed! +1,000 Coins added to your balance.',
+    };
+  }
+
+  if (code === PROMO_CODES.CHAI2026.code) {
+    redeemed.add(code);
+    const wraps = new Set<GunWrapId>(latest.cosmetics.unlockedWraps || ['none']);
+    wraps.add('golden_kettle');
+    const saved = await putProfile({
+      ...latest,
+      cosmetics: {
+        ...latest.cosmetics,
+        unlockedWraps: Array.from(wraps),
+        equippedWrap: 'golden_kettle',
+      },
+      redeemedCodes: Array.from(redeemed),
+    });
+    return {
+      ok: true,
+      profile: saved,
+      message: 'Code CHAI2026 redeemed! Exclusive Golden Kettle gun wrap unlocked & equipped.',
+    };
+  }
+
+  return { ok: false, error: `Invalid promo code "${code}".` };
 }
 

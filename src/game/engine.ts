@@ -2,9 +2,13 @@ import {
   BOT_NAMES,
   CHARACTERS,
   DEFAULT_CUSTOM_RULES,
+  EMOTE_DEFS,
   FLAME_COSMETICS,
+  GUN_GAME_LADDER,
   MELEE_WEAPONS,
+  PRIMARY_PICKUP_WEAPONS,
   RANKS,
+  SPRAY_DEFS,
   WEAPONS,
   getGameModeDef,
   getRankForXp,
@@ -15,17 +19,29 @@ import {
 import { createEmptyWeaponKills, makeUniqueUsername } from '../db/playerDb';
 import { PeerRoomSession } from '../net/peerRoom';
 import {
+  AfterimageRenderState,
   AimedWallSnapshot,
+  AnyPowerUpType,
+  BossRaidHudState,
+  ChaosEventType,
+  ChaosHudState,
   CharacterId,
   CtfHudState,
   CustomMatchRules,
   DominationHudState,
   DualWieldType,
+  EmotePopupHudState,
   FighterMatchSummary,
   GameMode,
+  GlassFloorRenderState,
+  GoldenAirdropHudState,
   GrenadeType,
+  GunGameHudState,
+  GunWrapId,
   HardpointHudState,
+  HologramRenderState,
   HudSnapshot,
+  JumpPadRenderState,
   KillFeedItem,
   KillFeedWeaponId,
   KillIconPrompt,
@@ -34,41 +50,61 @@ import {
   MatchSummary,
   MeleeWeaponId,
   MultikillAnnouncement,
+  MysteryPowerUpType,
   OnlinePeerMeta,
   PartyMember,
   PlayerProfile,
   PlayerSlotIndex,
+  PortalRenderState,
   PowerUpType,
   RemoteInputPacket,
   ReplayFrame,
   SecondaryWeaponId,
+  SubwayTrainHudState,
   TeamId,
   TeamScoreHud,
+  TurretHudState,
+  WallSprayHudState,
   WeaponId,
   WeaponMasteryTier,
   WeaponSlot,
+  WindVentRenderState,
   WorldSyncSnapshot,
   ZoomLevel,
 } from '../types/game';
 import { soundEngine } from './audio';
-import { ArenaMap, PickupType, getArenaMap } from './map';
+import { ArenaMap, PickupType, PlatformRect, getArenaMap } from './map';
 import { ArenaRenderer, CrosshairRenderInfo } from './renderer';
 import {
+  AfterimageGhost,
   AirstrikeBeaconEntity,
   BarrelEntity,
   CameraState,
+  CookerBombEntity,
   DestructibleWallEntity,
   DualWieldDropEntity,
+  EmotePopupEntity,
   FighterEntity,
   FloatingText,
+  GeometryBeamEntity,
+  GlassFloorEntity,
+  GoldenAirdropEntity,
   GrenadeEntity,
+  HologramCloneEntity,
+  JumpPadEntity,
   Particle,
   PickupEntity,
+  PortalPairEntity,
   PowerUpDropEntity,
   ProjectileEntity,
   ScorchDecal,
+  SecurityTurretEntity,
   SmokeCloudEntity,
+  SubwayTrainEntity,
   TempWallEntity,
+  WallSprayEntity,
+  WeaponDropEntity,
+  WindVentEntity,
 } from './types';
 
 export interface EngineStartConfig {
@@ -133,10 +169,18 @@ export class ArenaGameEngine {
   private nextAnnouncerId = 1;
   private nextPowerUpId = 1;
   private nextDualDropId = 1;
+  private nextWeaponDropId = 1;
   private nextKillIconId = 1;
+  private nextCookerId = 1;
+  private nextBeamId = 1;
+  private nextHologramId = 1;
+  private nextSprayId = 1;
+  private nextEmoteId = 1;
 
   private fighters: FighterEntity[] = [];
   private projectiles: ProjectileEntity[] = [];
+  private cookerBombs: CookerBombEntity[] = [];
+  private geometryBeams: GeometryBeamEntity[] = [];
   private grenades: GrenadeEntity[] = [];
   private smokeClouds: SmokeCloudEntity[] = [];
   private airstrikes: AirstrikeBeaconEntity[] = [];
@@ -145,6 +189,8 @@ export class ArenaGameEngine {
   private pickups: PickupEntity[] = [];
   private powerUps: PowerUpDropEntity[] = [];
   private dualWieldDrops: DualWieldDropEntity[] = [];
+  private weaponDrops: WeaponDropEntity[] = [];
+  private weaponDropSpawnTimer = 11;
   private tempWalls: TempWallEntity[] = [];
   private destructibleWalls: DestructibleWallEntity[] = [];
   private particles: Particle[] = [];
@@ -156,6 +202,37 @@ export class ArenaGameEngine {
   private pendingNetEvents: WorldSyncSnapshot['events'] = [];
   private replayFrames: ReplayFrame[] = [];
   private replayKillEvents: KillFeedItem[] = [];
+
+  // V3.0 Dynamic Chaos, Hazards & Interactive Gadgets
+  private chaosState: ChaosHudState = {
+    phase: 'idle',
+    eventType: null,
+    title: '',
+    subtitle: '',
+    remainingSec: 0,
+    warningTimerSec: 0,
+  };
+  private subwayTrain: SubwayTrainEntity | null = null;
+  private turret: SecurityTurretEntity | null = null;
+  private portals: PortalPairEntity[] = [];
+  private jumpPads: JumpPadEntity[] = [];
+  private windVents: WindVentEntity[] = [];
+  private glassFloors: GlassFloorEntity[] = [];
+  private goldenAirdrop: GoldenAirdropEntity = {
+    active: false,
+    landed: false,
+    x: 0,
+    y: 0,
+    vy: 85,
+    life: 0,
+  };
+  private collapsedPlatformIds = new Set<string>();
+  private earthquakeTimer = 0;
+  private earthquakeActive = false;
+  private holograms: HologramCloneEntity[] = [];
+  private wallSprays: WallSprayEntity[] = [];
+  private emotePopups: EmotePopupEntity[] = [];
+  private afterimages: AfterimageGhost[] = [];
 
   private teamScores: TeamScoreHud;
   private hardpointState: HardpointHudState;
@@ -172,7 +249,7 @@ export class ArenaGameEngine {
   // Input state
   private heldKeys = new Set<string>();
   private justPressed = new Set<string>();
-  private mouseScreen = { x: 0, y: 0, down: false, movedRecently: false };
+  private mouseScreen = { x: 0, y: 0, down: false, rightDown: false, movedRecently: false };
   private touchState = {
     active: false,
     moveX: 0,
@@ -192,6 +269,10 @@ export class ArenaGameEngine {
       meleeLatch: boolean;
       grenadeLatch: boolean;
       cycleGrenadeLatch: boolean;
+      grappleLatch: boolean;
+      dashDirLatch: -1 | 0 | 1;
+      emoteLatch: boolean;
+      sprayLatch: boolean;
       switchSlotLatch?: WeaponSlot;
     }
   >();
@@ -325,19 +406,38 @@ export class ArenaGameEngine {
   }
 
   public triggerTouchButton(
-    action: 'jump' | 'reload' | 'ultimate' | 'melee' | 'grenade' | 'cycle_grenade' | 'cycle_slot'
+    action:
+      | 'jump'
+      | 'reload'
+      | 'ultimate'
+      | 'melee'
+      | 'grenade'
+      | 'cycle_grenade'
+      | 'cycle_slot'
+      | 'grapple'
+      | 'dash_left'
+      | 'dash_right'
+      | 'emote'
+      | 'spray'
   ): void {
     this.touchButtonsJust.add(action);
   }
 
-  private getEffectiveClipSize(f: FighterEntity, weaponId: WeaponId): number {
-    const base = WEAPONS[weaponId].clipSize;
-    return f.characterId === 'tariff_boss' ? Math.ceil(base * 1.2) : base;
+  private getEffectiveClipSize(_f: FighterEntity, weaponId: WeaponId): number {
+    if (this.rules.gameMode === 'one_in_chamber' && weaponId === 'pistol') {
+      return 99;
+    }
+    return WEAPONS[weaponId].clipSize;
   }
 
   private getEffectiveReloadMs(f: FighterEntity, weaponId: WeaponId): number {
     const base = WEAPONS[weaponId].reloadMs;
-    return f.characterId === 'mitron' ? Math.round(base * 0.8) : base;
+    const charScaled = f.characterId === 'chai_storm' ? base * 0.8 : base;
+    const frenzyScaled =
+      this.chaosState.phase === 'active' && this.chaosState.eventType === 'hyper_frenzy'
+        ? charScaled / 1.5
+        : charScaled;
+    return Math.round(frenzyScaled);
   }
 
   private getMasteryForWeapon(
@@ -347,8 +447,14 @@ export class ArenaGameEngine {
     return (masteryMap && masteryMap[weaponId]) || 'none';
   }
 
+  private getActivePlatforms(): PlatformRect[] {
+    if (this.collapsedPlatformIds.size === 0) return this.map.platforms;
+    return this.map.platforms.filter((p) => !this.collapsedPlatformIds.has(p.id));
+  }
+
   private isTeamMode(): boolean {
-    return this.rules.gameMode !== 'ffa';
+    const gm = this.rules.gameMode;
+    return gm !== 'ffa' && gm !== 'gun_game' && gm !== 'one_in_chamber';
   }
 
   private isFriendly(a: FighterEntity | undefined, b: FighterEntity | undefined): boolean {
@@ -371,6 +477,10 @@ export class ArenaGameEngine {
       localPlayerIndex = 1,
     } = this.config;
 
+    this.collapsedPlatformIds.clear();
+    this.earthquakeTimer = 0;
+    this.earthquakeActive = false;
+
     this.pickups = this.map.pickupSpawns.map((sp, i) => ({
       id: sp.id,
       x: sp.x,
@@ -384,13 +494,20 @@ export class ArenaGameEngine {
 
     this.barrels = this.map.barrelSpawns.map((b) => ({
       id: b.id,
+      origX: b.x,
+      origY: b.y,
       x: b.x,
       y: b.y,
+      vx: 0,
+      vy: 0,
       w: 26,
       h: 38,
       hp: 45,
       maxHp: 45,
       alive: true,
+      launched: false,
+      launcherId: null,
+      fuseTimer: 0,
       respawnTimer: 0,
       hitFlashTimer: 0,
     }));
@@ -409,6 +526,64 @@ export class ArenaGameEngine {
       respawnTimer: 0,
       hitFlashTimer: 0,
     }));
+
+    // V3.0 Map Gadgets Initialization
+    this.portals = this.map.portalPair
+      ? [
+          {
+            ...this.map.portalPair,
+            pulse: 0,
+          },
+        ]
+      : [];
+
+    this.jumpPads = (this.map.jumpPads || []).map((jp) => ({
+      ...jp,
+      compress: 0,
+    }));
+
+    this.windVents = (this.map.windVents || []).map((wv) => ({ ...wv }));
+
+    this.glassFloors = (this.map.glassFloors || []).map((gf) => ({
+      ...gf,
+      cracks: 0,
+      alive: true,
+      respawnTimer: 0,
+    }));
+
+    this.turret = this.map.turretSpawn
+      ? {
+          x: this.map.turretSpawn.x,
+          y: this.map.turretSpawn.y,
+          terminalX: this.map.turretSpawn.terminalX,
+          terminalY: this.map.turretSpawn.terminalY,
+          ownerTeam: null,
+          ownerId: null,
+          ownerName: null,
+          hackProgress: 0,
+          hackingFighterId: null,
+          hackingPlayerName: null,
+          aimAngle: Math.PI / 2,
+          fireCooldown: 0.8,
+          muzzleFlashTimer: 0,
+        }
+      : null;
+
+    this.subwayTrain = this.map.subwayTrack
+      ? {
+          active: false,
+          warningTimerSec: 0,
+          nextCycleTimerSec: 25,
+          x: this.map.subwayTrack.minX - 800,
+          y: this.map.subwayTrack.y,
+          w: 760,
+          h: 62,
+          vx: 0,
+          dir: 1,
+          carCount: 4,
+          hitIds: new Set<string>(),
+        }
+      : null;
 
     const usedNames = new Set<string>();
     const claimName = (raw: string): string => makeUniqueUsername(raw, usedNames);
@@ -434,6 +609,7 @@ export class ArenaGameEngine {
             secondaryWeaponId: hostMeta.secondaryWeapon,
             meleeWeaponId: hostMeta.meleeWeapon,
             masteryMap: hostMeta.masteryEquipped,
+            gunWrap: hostMeta.gunWrap || 'none',
             x: hostSpawn.x,
             y: hostSpawn.y,
           })
@@ -455,6 +631,7 @@ export class ArenaGameEngine {
           secondaryWeaponId: p1Profile.cosmetics.equippedSecondary,
           meleeWeaponId: p1Profile.cosmetics.equippedMelee,
           masteryMap: p1Profile.masteryEquipped,
+          gunWrap: p1Profile.cosmetics.equippedWrap || 'none',
           x: localSpawn.x,
           y: localSpawn.y,
         })
@@ -494,13 +671,15 @@ export class ArenaGameEngine {
         secondaryWeaponId: p1Profile.cosmetics.equippedSecondary,
         meleeWeaponId: p1Profile.cosmetics.equippedMelee,
         masteryMap: p1Profile.masteryEquipped,
+        gunWrap: p1Profile.cosmetics.equippedWrap || 'none',
         x: p1Spawn.x,
         y: p1Spawn.y,
       })
     );
 
     if (mode === 'versus_2p' && p2Profile) {
-      const p2Spawn = bravoSpawnList[0];
+      const p2Team: TeamId = this.rules.gameMode === 'boss_raid' ? 'alpha' : 'bravo';
+      const p2Spawn = p2Team === 'alpha' ? alphaSpawnList[1] : bravoSpawnList[0];
       this.fighters.push(
         this.createFighter({
           id: 'p2',
@@ -511,12 +690,13 @@ export class ArenaGameEngine {
           rank: getRankForXp(p2Profile.xp),
           isHuman: true,
           playerIndex: 2,
-          team: 'bravo',
+          team: p2Team,
           profileId: p2Profile.id,
           weaponId: p2Profile.cosmetics.equippedStartingWeapon,
           secondaryWeaponId: p2Profile.cosmetics.equippedSecondary,
           meleeWeaponId: p2Profile.cosmetics.equippedMelee,
           masteryMap: p2Profile.masteryEquipped,
+          gunWrap: p2Profile.cosmetics.equippedWrap || 'none',
           x: p2Spawn.x,
           y: p2Spawn.y,
         })
@@ -546,6 +726,7 @@ export class ArenaGameEngine {
             secondaryWeaponId: peerItem.meta.secondaryWeapon,
             meleeWeaponId: peerItem.meta.meleeWeapon,
             masteryMap: peerItem.meta.masteryEquipped,
+            gunWrap: peerItem.meta.gunWrap || 'none',
             x: sp.x,
             y: sp.y,
           })
@@ -570,20 +751,14 @@ export class ArenaGameEngine {
           weaponId: m.startingWeapon,
           secondaryWeaponId: m.secondaryWeapon,
           meleeWeaponId: m.meleeWeapon,
+          gunWrap: m.gunWrap || 'none',
           x: sp.x,
           y: sp.y,
         })
       );
     });
 
-    // Balance arena bots: ensure Team Bravo always has rivals in team modes!
-    const alphaCount = this.fighters.filter((f) => f.team === 'alpha').length;
-    const bravoCount = this.fighters.filter((f) => f.team === 'bravo').length;
-    const effectiveBotCount =
-      this.isTeamMode() && bravoCount === 0
-        ? Math.max(botCount, alphaCount)
-        : botCount;
-
+    const isBossRaid = this.rules.gameMode === 'boss_raid';
     const usedChars = new Set(this.fighters.map((f) => f.characterId));
     const botChars = CHARACTERS.filter((c) => !c.isPremium && !usedChars.has(c.id));
     const availableBotNames = BOT_NAMES.filter((bn) => !usedNames.has(bn.toLowerCase()));
@@ -591,34 +766,131 @@ export class ArenaGameEngine {
     const botSecondaries: SecondaryWeaponId[] = ['pistol', 'uzi', 'shorty', 'revolver', 'ghost_pistol'];
     const botMelees: MeleeWeaponId[] = ['knife', 'karambit', 'katana', 'boxing_glove'];
 
-    for (let i = 0; i < effectiveBotCount; i++) {
-      const curAlpha = this.fighters.filter((f) => f.team === 'alpha').length;
-      const curBravo = this.fighters.filter((f) => f.team === 'bravo').length;
-      const team: TeamId =
-        this.isTeamMode() && curBravo <= curAlpha ? 'bravo' : curAlpha < curBravo ? 'alpha' : 'bravo';
-      const spawnPool = team === 'alpha' ? alphaSpawnList : bravoSpawnList;
-      const sp = spawnPool[i % spawnPool.length];
-      const charDef = botChars[i % botChars.length] || CHARACTERS[i % CHARACTERS.length];
-      const botRank = RANKS[Math.min(RANKS.length - 1, Math.floor(Math.random() * 3) + 1)];
-      const botWeapon = botWeapons[i % botWeapons.length];
-      const candidateName = availableBotNames[i] || `Bot_Agent_${i + 1}`;
-      this.fighters.push(
-        this.createFighter({
-          id: `bot_${i + 1}`,
-          name: claimName(candidateName),
-          characterId: charDef.id,
-          outfitId: 'charcoal',
-          flameId: team === 'alpha' ? 'cobalt' : 'crimson',
-          rank: botRank,
-          isHuman: false,
-          team,
-          weaponId: botWeapon,
-          secondaryWeaponId: botSecondaries[i % botSecondaries.length],
-          meleeWeaponId: botMelees[i % botMelees.length],
-          x: sp.x,
-          y: sp.y,
-        })
-      );
+    if (isBossRaid) {
+      // Ensure Alpha has up to 4 fighters (add friendly bots if solo/duo)
+      const neededAllies = Math.max(0, 4 - this.fighters.filter((f) => f.team === 'alpha').length);
+      for (let i = 0; i < neededAllies; i++) {
+        const sp = alphaSpawnList[(this.fighters.length + i) % alphaSpawnList.length];
+        const charDef = botChars[i % botChars.length] || CHARACTERS[i % CHARACTERS.length];
+        const botRank = RANKS[Math.min(RANKS.length - 1, Math.floor(Math.random() * 3) + 1)];
+        this.fighters.push(
+          this.createFighter({
+            id: `ally_bot_${i + 1}`,
+            name: claimName(availableBotNames[i] || `Ally_${i + 1}`),
+            characterId: charDef.id,
+            outfitId: 'navy',
+            flameId: 'cobalt',
+            rank: botRank,
+            isHuman: false,
+            team: 'alpha',
+            weaponId: botWeapons[i % botWeapons.length],
+            secondaryWeaponId: botSecondaries[i % botSecondaries.length],
+            meleeWeaponId: botMelees[i % botMelees.length],
+            gunWrap: 'none',
+            x: sp.x,
+            y: sp.y,
+          })
+        );
+      }
+
+      // Spawn the 1,500 HP Mega Baron Voltage Raid Boss on Team Bravo!
+      const bossSpawn = this.map.podiumZone
+        ? { x: this.map.podiumZone.x + this.map.podiumZone.w / 2, y: this.map.podiumZone.y + 40 }
+        : bravoSpawnList[0];
+      const bossFighter = this.createFighter({
+        id: 'boss_mega_baron',
+        name: 'MEGA BARON VOLTAGE',
+        characterId: 'baron_voltage',
+        outfitId: 'sovereign',
+        flameId: 'violet',
+        rank: RANKS[RANKS.length - 1],
+        isHuman: false,
+        team: 'bravo',
+        weaponId: 'minigun',
+        secondaryWeaponId: 'revolver',
+        meleeWeaponId: 'katana',
+        gunWrap: 'royal_gold',
+        x: bossSpawn.x,
+        y: bossSpawn.y,
+      });
+      bossFighter.isBoss = true;
+      bossFighter.maxHp = 1500;
+      bossFighter.hp = 1500;
+      bossFighter.w = 46;
+      bossFighter.h = 78;
+      bossFighter.bossEmpTimer = 7.5;
+      this.fighters.push(bossFighter);
+    } else {
+      // Balance arena bots: ensure Team Bravo always has rivals in team modes!
+      const alphaCount = this.fighters.filter((f) => f.team === 'alpha').length;
+      const bravoCount = this.fighters.filter((f) => f.team === 'bravo').length;
+      const effectiveBotCount =
+        this.isTeamMode() && bravoCount === 0 ? Math.max(botCount, alphaCount) : botCount;
+
+      for (let i = 0; i < effectiveBotCount; i++) {
+        const curAlpha = this.fighters.filter((f) => f.team === 'alpha').length;
+        const curBravo = this.fighters.filter((f) => f.team === 'bravo').length;
+        const team: TeamId =
+          this.isTeamMode() && curBravo <= curAlpha ? 'bravo' : curAlpha < curBravo ? 'alpha' : 'bravo';
+        const spawnPool = team === 'alpha' ? alphaSpawnList : bravoSpawnList;
+        const sp = spawnPool[i % spawnPool.length];
+        const charDef = botChars[i % botChars.length] || CHARACTERS[i % CHARACTERS.length];
+        const botRank = RANKS[Math.min(RANKS.length - 1, Math.floor(Math.random() * 3) + 1)];
+        const botWeapon = botWeapons[i % botWeapons.length];
+        const candidateName = availableBotNames[i] || `Bot_Agent_${i + 1}`;
+        this.fighters.push(
+          this.createFighter({
+            id: `bot_${i + 1}`,
+            name: claimName(candidateName),
+            characterId: charDef.id,
+            outfitId: 'charcoal',
+            flameId: team === 'alpha' ? 'cobalt' : 'crimson',
+            rank: botRank,
+            isHuman: false,
+            team,
+            weaponId: botWeapon,
+            secondaryWeaponId: botSecondaries[i % botSecondaries.length],
+            meleeWeaponId: botMelees[i % botMelees.length],
+            gunWrap: 'none',
+            x: sp.x,
+            y: sp.y,
+          })
+        );
+      }
+    }
+
+    // Apply Special Mode Starting Overrides (VIP / Gun Game / One-in-the-Chamber)
+    if (this.rules.gameMode === 'vip') {
+      const alphaVip = this.fighters.find((f) => (f.team || 'alpha') === 'alpha');
+      const bravoVip = this.fighters.find((f) => f.team === 'bravo');
+      for (const vip of [alphaVip, bravoVip]) {
+        if (vip) {
+          vip.isVip = true;
+          vip.maxHp = 300;
+          vip.hp = 300;
+        }
+      }
+    } else if (this.rules.gameMode === 'gun_game') {
+      const tier0 = GUN_GAME_LADDER[0];
+      for (const f of this.fighters) {
+        f.gunGameTier = 0;
+        f.primaryWeaponId = tier0;
+        f.weaponId = tier0;
+        f.activeSlot = 'primary';
+        f.primaryAmmo = this.getEffectiveClipSize(f, tier0);
+        f.ammo = f.primaryAmmo;
+      }
+    } else if (this.rules.gameMode === 'one_in_chamber') {
+      for (const f of this.fighters) {
+        f.maxHp = 1;
+        f.hp = 1;
+        f.activeSlot = 'secondary';
+        f.secondaryWeaponId = 'pistol';
+        f.weaponId = 'pistol';
+        f.secondaryAmmo = 1;
+        f.ammo = 1;
+        f.grenades = 0;
+      }
     }
 
     const initialZoom = this.config.zoom ?? 1;
@@ -655,24 +927,22 @@ export class ArenaGameEngine {
     secondaryWeaponId?: SecondaryWeaponId;
     meleeWeaponId?: MeleeWeaponId;
     masteryMap?: Partial<Record<WeaponId, WeaponMasteryTier>>;
+    gunWrap?: GunWrapId;
     x: number;
     y: number;
   }): FighterEntity {
     const maxHp =
-      params.characterId === 'yogi_boy'
+      params.characterId === 'baba_wifi' || params.characterId === 'bhaijaan_gymbro'
         ? 125
-        : params.characterId === 'thongi_baba'
+        : params.characterId === 'dj_dholak' || params.characterId === 'thongi_baba'
         ? 115
         : 100;
-    const maxFuel = params.characterId === 'revolutionary' ? 115 : 100;
+    const maxFuel = params.characterId === 'captain_jalebi' ? 115 : 100;
     const primaryWeaponId = params.weaponId;
     const secondaryWeaponId = normalizeSecondaryId(params.secondaryWeaponId || 'pistol');
     const meleeWeaponId = normalizeMeleeId(params.meleeWeaponId || 'knife');
-    const baseClip = WEAPONS[primaryWeaponId].clipSize;
-    const primaryAmmo = params.characterId === 'tariff_boss' ? Math.ceil(baseClip * 1.2) : baseClip;
-    const secBaseClip = WEAPONS[secondaryWeaponId].clipSize;
-    const secondaryAmmo =
-      params.characterId === 'tariff_boss' ? Math.ceil(secBaseClip * 1.2) : secBaseClip;
+    const primaryAmmo = WEAPONS[primaryWeaponId].clipSize;
+    const secondaryAmmo = WEAPONS[secondaryWeaponId].clipSize;
     const isSniper = WEAPONS[primaryWeaponId].category === 'Sniper';
 
     return {
@@ -714,11 +984,13 @@ export class ArenaGameEngine {
       secondaryAmmo,
       meleeWeaponId,
       weaponMastery: this.getMasteryForWeapon(params.masteryMap, primaryWeaponId),
+      gunWrap: params.gunWrap || 'none',
       masteryMap: params.masteryMap,
       ammo: primaryAmmo,
       isReloading: false,
       reloadTimerMs: 0,
       fireCooldownMs: 0,
+      minigunSpinTimer: 0,
       burstRemaining: 0,
       burstTimerMs: 0,
       recoilKick: 0,
@@ -751,6 +1023,42 @@ export class ArenaGameEngine {
       inPodium: false,
       speechText: '',
       speechTimer: 0,
+      stunTimer: 0,
+      danceTimer: 0,
+      freezeTimer: 0,
+      empDisableTimer: 0,
+      empDotTimer: 0,
+      empTickAccum: 0,
+      empOwnerId: null,
+      slamPending: false,
+      gossipCooldown: 0,
+      grappleActive: false,
+      grappleX: 0,
+      grappleY: 0,
+      grappleLen: 0,
+      dashTimer: 0,
+      dashCooldown: 0,
+      dashDir: 0,
+      lastTapLeftAt: -10,
+      lastTapRightAt: -10,
+      shrinkTimer: 0,
+      megaSizeTimer: 0,
+      bubbleShieldHp: 0,
+      bubbleShieldTimer: 0,
+      isLastStand: false,
+      lastStandTimer: 0,
+      isVip: false,
+      isBoss: false,
+      bossEmpTimer: 7.5,
+      gunGameTier: 0,
+      portalCooldown: 0,
+      emoteIndex: 0,
+      sprayIndex: 0,
+      consecutiveDeathsFrom: {},
+      nemesisKillerIds: [],
+      afterlifeKillsCount: 0,
+      nemesisKillsCount: 0,
+      nemesisRevengeCoinsEarned: 0,
       kills: 0,
       deaths: 0,
       damageDealt: 0,
@@ -801,11 +1109,19 @@ export class ArenaGameEngine {
             meleeLatch: false,
             grenadeLatch: false,
             cycleGrenadeLatch: false,
+            grappleLatch: false,
+            dashDirLatch: 0 as -1 | 0 | 1,
+            emoteLatch: false,
+            sprayLatch: false,
           };
           if (input.upJust) existing.upJustLatch = true;
           if (input.meleeJust) existing.meleeLatch = true;
           if (input.grenadeJust) existing.grenadeLatch = true;
           if (input.cycleGrenadeJust) existing.cycleGrenadeLatch = true;
+          if (input.grappleJust) existing.grappleLatch = true;
+          if (input.dashDir) existing.dashDirLatch = input.dashDir;
+          if (input.emoteJust) existing.emoteLatch = true;
+          if (input.sprayJust) existing.sprayLatch = true;
           if (input.switchSlot) existing.switchSlotLatch = input.switchSlot;
           existing.packet = input;
           this.remoteInputs.set(senderSlot, existing);
@@ -869,18 +1185,30 @@ export class ArenaGameEngine {
     if (e.button === 0) {
       this.mouseScreen.down = true;
       soundEngine.unlock();
+    } else if (e.button === 2) {
+      e.preventDefault();
+      this.mouseScreen.rightDown = true;
+      this.justPressed.add('MouseRight');
+      soundEngine.unlock();
     }
   };
 
   private handleMouseUp = (e: MouseEvent) => {
     if (e.button === 0) {
       this.mouseScreen.down = false;
+    } else if (e.button === 2) {
+      this.mouseScreen.rightDown = false;
     }
+  };
+
+  private handleContextMenu = (e: MouseEvent) => {
+    e.preventDefault();
   };
 
   private handleBlur = () => {
     this.heldKeys.clear();
     this.mouseScreen.down = false;
+    this.mouseScreen.rightDown = false;
   };
 
   private bindEvents(): void {
@@ -889,6 +1217,7 @@ export class ArenaGameEngine {
     window.addEventListener('blur', this.handleBlur);
     this.canvas.addEventListener('mousemove', this.handleMouseMove);
     this.canvas.addEventListener('mousedown', this.handleMouseDown);
+    this.canvas.addEventListener('contextmenu', this.handleContextMenu);
     window.addEventListener('mouseup', this.handleMouseUp);
   }
 
@@ -905,6 +1234,7 @@ export class ArenaGameEngine {
     window.removeEventListener('blur', this.handleBlur);
     this.canvas.removeEventListener('mousemove', this.handleMouseMove);
     this.canvas.removeEventListener('mousedown', this.handleMouseDown);
+    this.canvas.removeEventListener('contextmenu', this.handleContextMenu);
     window.removeEventListener('mouseup', this.handleMouseUp);
   }
 
@@ -938,6 +1268,7 @@ export class ArenaGameEngine {
         playerIndex: f.playerIndex,
         team: f.team,
         weaponMastery: f.weaponMastery,
+        gunWrap: f.gunWrap,
       })),
       frames: this.replayFrames,
       killEvents: this.replayKillEvents,
@@ -1007,6 +1338,23 @@ export class ArenaGameEngine {
         const order: WeaponSlot[] = ['primary', 'secondary', 'melee'];
         switchSlot = order[(order.indexOf(clientFighter.activeSlot) + 1) % order.length];
       }
+      let dashDir: -1 | 0 | 1 = 0;
+      if (this.justPressed.has('KeyA')) {
+        if (this.elapsedSec - clientFighter.lastTapLeftAt <= 0.26) dashDir = -1;
+        clientFighter.lastTapLeftAt = this.elapsedSec;
+      } else if (this.justPressed.has('KeyD')) {
+        if (this.elapsedSec - clientFighter.lastTapRightAt <= 0.26) dashDir = 1;
+        clientFighter.lastTapRightAt = this.elapsedSec;
+      } else if (this.touchButtonsJust.has('dash_left')) dashDir = -1;
+      else if (this.touchButtonsJust.has('dash_right')) dashDir = 1;
+
+      const grapple =
+        this.mouseScreen.rightDown || this.heldKeys.has('KeyC') || this.touchButtonsJust.has('grapple');
+      const grappleJust =
+        this.justPressed.has('MouseRight') ||
+        this.justPressed.has('KeyC') ||
+        this.touchButtonsJust.has('grapple');
+
       const packet: RemoteInputPacket = {
         left: this.heldKeys.has('KeyA') || this.touchState.moveX < -0.25,
         right: this.heldKeys.has('KeyD') || this.touchState.moveX > 0.25,
@@ -1031,6 +1379,11 @@ export class ArenaGameEngine {
           this.justPressed.has('Tab') || this.touchButtonsJust.has('cycle_grenade'),
         switchSlot,
         aimAngle,
+        grapple,
+        grappleJust,
+        dashDir,
+        emoteJust: this.justPressed.has('KeyT') || this.touchButtonsJust.has('emote'),
+        sprayJust: this.justPressed.has('KeyY') || this.touchButtonsJust.has('spray'),
       };
       this.config.peerSession?.send({ type: 'input', payload: packet });
       cam.x += (clientFighter.x - cam.x) * Math.min(1, dt * 8);
@@ -1040,10 +1393,16 @@ export class ArenaGameEngine {
 
     this.updateParticles(dt);
     this.updateFloatingTexts(dt);
+    this.updateAfterimages(dt);
+    this.updateEmotesAndSprays(dt);
     for (const s of this.smokeClouds) {
       s.life -= dt;
     }
     this.smokeClouds = this.smokeClouds.filter((s) => s.life > 0);
+    for (const bm of this.geometryBeams) {
+      bm.life -= dt;
+    }
+    this.geometryBeams = this.geometryBeams.filter((bm) => bm.life > 0);
     if (this.activeKillIcons.length > 0) {
       this.activeKillIcons = this.activeKillIcons
         .map((k) => ({ ...k, remainingSec: k.remainingSec - dt }))
@@ -1078,6 +1437,87 @@ export class ArenaGameEngine {
         .filter((k) => k.remainingSec > 0);
     }
 
+    // V3.0 Mid-Match Chaos Event (halfway through match)
+    if (this.chaosState.phase === 'idle') {
+      const triggerAt = Math.max(20, (this.rules.durationSec || 180) * 0.5);
+      if (this.elapsedSec >= triggerAt) {
+        this.chaosState = {
+          phase: 'warning',
+          eventType: null,
+          title: 'WARNING: CHAOS EVENT!',
+          subtitle: 'Reality anomaly incoming...',
+          remainingSec: 0,
+          warningTimerSec: 3.0,
+        };
+        soundEngine.playChaosWarning();
+        this.pendingNetEvents.push({ kind: 'chaos_warning' });
+      }
+    } else if (this.chaosState.phase === 'warning') {
+      this.chaosState.warningTimerSec = Math.max(0, this.chaosState.warningTimerSec - dt);
+      if (this.chaosState.warningTimerSec <= 0) {
+        const pool: ChaosEventType[] = [
+          'zero_gravity',
+          'golden_airdrop',
+          'blackout',
+          'hyper_frenzy',
+        ];
+        const picked = pool[Math.floor(Math.random() * pool.length)];
+        const meta: Record<ChaosEventType, { title: string; sub: string }> = {
+          zero_gravity: {
+            title: 'ZERO-GRAVITY MOONWALK!',
+            sub: '70% lower gravity for 25s',
+          },
+          golden_airdrop: {
+            title: 'GOLDEN AIRDROP CRATE!',
+            sub: 'Mythic Orbital Laser dropping center-map!',
+          },
+          blackout: {
+            title: 'CITY BLACKOUT!',
+            sub: 'Arena darkened — fight by tracer & visor light!',
+          },
+          hyper_frenzy: {
+            title: 'HYPER-SPEED FRENZY!',
+            sub: '1.5x move, fire rate & reload speed for 25s!',
+          },
+        };
+        this.chaosState = {
+          phase: 'active',
+          eventType: picked,
+          title: meta[picked].title,
+          subtitle: meta[picked].sub,
+          remainingSec: 25.0,
+          warningTimerSec: 0,
+        };
+        if (picked === 'golden_airdrop') {
+          this.goldenAirdrop = {
+            active: true,
+            landed: false,
+            x: this.map.width / 2,
+            y: 70,
+            vy: 85,
+            life: 25,
+          };
+        }
+        soundEngine.playChaosWarning();
+      }
+    } else if (this.chaosState.phase === 'active') {
+      this.chaosState.remainingSec = Math.max(0, this.chaosState.remainingSec - dt);
+      if (this.chaosState.remainingSec <= 0) {
+        this.chaosState = {
+          phase: 'done',
+          eventType: null,
+          title: '',
+          subtitle: '',
+          remainingSec: 0,
+          warningTimerSec: 0,
+        };
+      }
+    }
+
+    soundEngine.setMusicIntense(
+      this.chaosState.phase === 'active' || this.timeRemainingSec <= 30
+    );
+
     const { mode } = this.config;
 
     for (const f of this.fighters) {
@@ -1101,8 +1541,75 @@ export class ArenaGameEngine {
       if (f.meleeCooldownTimer > 0) f.meleeCooldownTimer = Math.max(0, f.meleeCooldownTimer - dt);
       if (f.meleeSwingTimer > 0) f.meleeSwingTimer = Math.max(0, f.meleeSwingTimer - dt);
       if (f.speechTimer > 0) f.speechTimer = Math.max(0, f.speechTimer - dt);
+      if (f.stunTimer > 0) f.stunTimer = Math.max(0, f.stunTimer - dt);
+      if (f.danceTimer > 0) f.danceTimer = Math.max(0, f.danceTimer - dt);
+      if (f.freezeTimer > 0) f.freezeTimer = Math.max(0, f.freezeTimer - dt);
+      if (f.empDisableTimer > 0) f.empDisableTimer = Math.max(0, f.empDisableTimer - dt);
+      if (f.portalCooldown > 0) f.portalCooldown = Math.max(0, f.portalCooldown - dt);
+      if (f.dashCooldown > 0) f.dashCooldown = Math.max(0, f.dashCooldown - dt);
+      if (f.shrinkTimer > 0) f.shrinkTimer = Math.max(0, f.shrinkTimer - dt);
+      if (f.megaSizeTimer > 0) f.megaSizeTimer = Math.max(0, f.megaSizeTimer - dt);
+      if (f.bubbleShieldTimer > 0) {
+        f.bubbleShieldTimer = Math.max(0, f.bubbleShieldTimer - dt);
+        if (f.bubbleShieldTimer <= 0) f.bubbleShieldHp = 0;
+      }
+      if (f.dashTimer > 0) {
+        f.dashTimer = Math.max(0, f.dashTimer - dt);
+        const charColor =
+          CHARACTERS.find((c) => c.id === f.characterId)?.tieColor || '#38BDF8';
+        this.afterimages.push({
+          x: f.x,
+          y: f.y,
+          facing: f.facing,
+          color: charColor,
+          alpha: 0.72,
+        });
+      }
+      if (f.isLastStand) {
+        f.lastStandTimer -= dt;
+        if (f.lastStandTimer <= 0) {
+          this.handleFighterDeath(f, f.lastHitById || f.id, f.lastHitWeapon || 'pistol', false);
+          continue;
+        }
+      }
+      if (f.empDotTimer > 0) {
+        f.empDotTimer = Math.max(0, f.empDotTimer - dt);
+        f.empTickAccum += dt;
+        if (f.empTickAccum >= 0.5) {
+          f.empTickAccum -= 0.5;
+          this.spawnBurst(f.x, f.y - 4, '#22D3EE', 5, 130);
+          this.applyDamage(f, 8, f.empOwnerId || f.id, 'ultimate', false);
+          if (!f.alive) continue;
+        }
+      }
 
-      if (f.grenades < 2) {
+      if (f.characterId === 'aunty_cctv' && f.ultActiveTimer > 0) {
+        f.gossipCooldown -= dt;
+        if (f.gossipCooldown <= 0) {
+          f.gossipCooldown = 0.42;
+          const enemy = this.findNearestEnemy(f);
+          if (enemy && Math.hypot(enemy.x - f.x, enemy.y - f.y) <= 640) {
+            const ang = Math.atan2(enemy.y - (f.y - 10), enemy.x - f.x);
+            const dist = Math.hypot(enemy.x - f.x, enemy.y - (f.y - 10));
+            this.geometryBeams.push({
+              id: this.nextBeamId++,
+              ownerId: f.id,
+              x: f.x,
+              y: f.y - 10,
+              angle: ang,
+              length: dist,
+              life: 0.18,
+              maxLife: 0.18,
+              color: '#F472B6',
+              isGossip: true,
+            });
+            soundEngine.playLaserZap();
+            this.applyDamage(enemy, 18, f.id, 'ultimate', false);
+          }
+        }
+      }
+
+      if (f.grenades < 2 && this.rules.gameMode !== 'one_in_chamber') {
         f.grenadeRegenTimer -= dt;
         if (f.grenadeRegenTimer <= 0) {
           f.grenades += 1;
@@ -1132,6 +1639,11 @@ export class ArenaGameEngine {
         cycleGrenadeJust: boolean;
         switchSlot?: WeaponSlot;
         aimAngle: number;
+        grapple: boolean;
+        grappleJust: boolean;
+        dashDir: -1 | 0 | 1;
+        emoteJust: boolean;
+        sprayJust: boolean;
       };
 
       if (f.isHuman) {
@@ -1147,11 +1659,20 @@ export class ArenaGameEngine {
               grenadeJust: remote.packet.grenadeJust || remote.grenadeLatch,
               cycleGrenadeJust: remote.packet.cycleGrenadeJust || remote.cycleGrenadeLatch,
               switchSlot: remote.packet.switchSlot || remote.switchSlotLatch,
+              grapple: Boolean(remote.packet.grapple),
+              grappleJust: Boolean(remote.packet.grappleJust || remote.grappleLatch),
+              dashDir: (remote.packet.dashDir || remote.dashDirLatch || 0) as -1 | 0 | 1,
+              emoteJust: Boolean(remote.packet.emoteJust || remote.emoteLatch),
+              sprayJust: Boolean(remote.packet.sprayJust || remote.sprayLatch),
             };
             remote.upJustLatch = false;
             remote.meleeLatch = false;
             remote.grenadeLatch = false;
             remote.cycleGrenadeLatch = false;
+            remote.grappleLatch = false;
+            remote.dashDirLatch = 0;
+            remote.emoteLatch = false;
+            remote.sprayLatch = false;
             remote.switchSlotLatch = undefined;
           } else {
             input = {
@@ -1167,6 +1688,11 @@ export class ArenaGameEngine {
               grenadeJust: false,
               cycleGrenadeJust: false,
               aimAngle: f.aimAngle,
+              grapple: false,
+              grappleJust: false,
+              dashDir: 0,
+              emoteJust: false,
+              sprayJust: false,
             };
           }
         } else {
@@ -1176,27 +1702,119 @@ export class ArenaGameEngine {
         input = this.getBotInput(f, dt);
       }
 
+      if (f.stunTimer > 0) {
+        input.left = false;
+        input.right = false;
+        input.up = false;
+        input.upJust = false;
+        input.down = false;
+        input.shoot = false;
+        input.reload = false;
+        input.ultimate = false;
+        input.meleeJust = false;
+        input.grenadeJust = false;
+        input.switchSlot = undefined;
+        input.grapple = false;
+        input.grappleJust = false;
+        input.dashDir = 0;
+      } else if (f.danceTimer > 0) {
+        const beat = Math.sin(this.elapsedSec * 18);
+        input.left = beat < -0.15;
+        input.right = beat > 0.15;
+        input.up = false;
+        input.upJust = f.grounded && Math.sin(this.elapsedSec * 9) > 0.88;
+        input.down = false;
+        input.shoot = false;
+        input.reload = false;
+        input.ultimate = false;
+        input.meleeJust = false;
+        input.grenadeJust = false;
+        input.switchSlot = undefined;
+        input.aimAngle = beat * 0.9;
+        input.grapple = false;
+        input.grappleJust = false;
+        input.dashDir = 0;
+      }
+
       f.aimAngle = input.aimAngle;
       f.facing = Math.cos(f.aimAngle) >= 0 ? 1 : -1;
+
+      if (input.emoteJust) {
+        const emoteDef = EMOTE_DEFS[f.emoteIndex % EMOTE_DEFS.length];
+        f.emoteIndex = (f.emoteIndex + 1) % EMOTE_DEFS.length;
+        this.emotePopups.push({
+          id: this.nextEmoteId++,
+          fighterId: f.id,
+          x: f.x,
+          y: f.y - 46,
+          emoteId: emoteDef.id,
+          life: 2.0,
+          maxLife: 2.0,
+        });
+        soundEngine.playEmote();
+        this.pendingNetEvents.push({ kind: 'emote', x: f.x, y: f.y });
+      }
+
+      if (input.sprayJust) {
+        const sprayDef = SPRAY_DEFS[f.sprayIndex % SPRAY_DEFS.length];
+        f.sprayIndex = (f.sprayIndex + 1) % SPRAY_DEFS.length;
+        this.wallSprays.push({
+          id: this.nextSprayId++,
+          x: f.x,
+          y: f.y,
+          sprayId: sprayDef.id,
+          ownerName: f.name,
+          life: 25,
+          maxLife: 25,
+        });
+        if (this.wallSprays.length > 16) this.wallSprays.shift();
+        soundEngine.playSpray();
+        this.pendingNetEvents.push({ kind: 'spray', x: f.x, y: f.y });
+      }
+
+      if (input.dashDir !== 0 && f.dashCooldown <= 0 && !f.isLastStand && f.empDisableTimer <= 0) {
+        f.dashDir = input.dashDir;
+        f.dashTimer = 0.24;
+        f.dashCooldown = 1.4;
+        f.vx = input.dashDir * 820;
+        f.vy = Math.min(f.vy, -40);
+        soundEngine.playDash();
+        this.spawnBurst(f.x, f.y, '#38BDF8', 8, 170);
+        this.pendingNetEvents.push({ kind: 'dash', x: f.x, y: f.y });
+      }
+
+      if (input.grappleJust && !f.isLastStand) {
+        const anchor = this.raycastGrappleAnchor(f);
+        if (anchor) {
+          f.grappleActive = true;
+          f.grappleX = anchor.x;
+          f.grappleY = anchor.y;
+          f.grappleLen = Math.hypot(anchor.x - f.x, anchor.y - f.y);
+          soundEngine.playGrappleFire();
+          this.pendingNetEvents.push({ kind: 'grapple', x: anchor.x, y: anchor.y });
+        }
+      } else if (!input.grapple) {
+        f.grappleActive = false;
+      }
 
       if (input.switchSlot) {
         this.switchFighterSlot(f, input.switchSlot);
       }
 
-      if (input.cycleGrenadeJust) {
+      if (input.cycleGrenadeJust && !f.isLastStand) {
         const order: GrenadeType[] = ['frag', 'smoke', 'plasma'];
         f.grenadeType = order[(order.indexOf(f.grenadeType) + 1) % order.length];
       }
 
-      if (input.grenadeJust && f.grenades > 0) {
+      if (input.grenadeJust && f.grenades > 0 && !f.isLastStand) {
         this.throwGrenade(f);
       }
 
-      if (input.meleeJust && f.meleeCooldownTimer <= 0) {
+      if (input.meleeJust && f.meleeCooldownTimer <= 0 && !f.isLastStand) {
         this.performMeleeStrike(f);
       }
 
-      if (input.ultimate && f.ultCharge >= 100) {
+      if (input.ultimate && f.ultCharge >= 100 && !f.isLastStand) {
         this.activateUltimate(f);
       }
 
@@ -1207,7 +1825,24 @@ export class ArenaGameEngine {
     this.updateActiveModeRules(dt);
     if (this.ended) return;
 
+    for (const p of this.portals) {
+      p.pulse += dt * 4;
+    }
+    for (const jp of this.jumpPads) {
+      jp.compress = Math.max(0, jp.compress - dt * 4.5);
+    }
+
+    this.updateSubwayTrain(dt);
+    this.updateEarthquakeCollapse(dt);
+    this.updateSecurityTurret(dt);
+    this.updateGlassFloors(dt);
+    this.updateGoldenAirdrop(dt);
+    this.updateHolograms(dt);
+    this.updateAfterimages(dt);
+    this.updateEmotesAndSprays(dt);
     this.updateProjectiles(dt);
+    this.updateCookerBombs(dt);
+    this.updateGeometryBeams(dt);
     this.updateGrenades(dt);
     this.updateSmokeClouds(dt);
     this.updateAirstrikes(dt);
@@ -1217,6 +1852,14 @@ export class ArenaGameEngine {
     this.updatePickups(dt);
     this.updatePowerUpDrops(dt);
     this.updateDualWieldDrops(dt);
+    this.updateWeaponDrops(dt);
+    this.weaponDropSpawnTimer -= dt;
+    if (this.weaponDropSpawnTimer <= 0) {
+      this.weaponDropSpawnTimer = 14;
+      if (this.weaponDrops.length < 3 && this.rules.gameMode !== 'gun_game' && this.rules.gameMode !== 'one_in_chamber') {
+        this.spawnMidMapWeaponDrop();
+      }
+    }
     this.updateParticles(dt);
     this.updateFloatingTexts(dt);
     this.updateCameras(dt);
@@ -1320,6 +1963,25 @@ export class ArenaGameEngine {
       }
     }
 
+    let dashDir: -1 | 0 | 1 = 0;
+    if (this.justPressed.has('KeyA') || (isSoloLike && this.justPressed.has('ArrowLeft'))) {
+      if (this.elapsedSec - f.lastTapLeftAt <= 0.26) dashDir = -1;
+      f.lastTapLeftAt = this.elapsedSec;
+    } else if (this.justPressed.has('KeyD') || (isSoloLike && this.justPressed.has('ArrowRight'))) {
+      if (this.elapsedSec - f.lastTapRightAt <= 0.26) dashDir = 1;
+      f.lastTapRightAt = this.elapsedSec;
+    } else if (this.touchButtonsJust.has('dash_left')) dashDir = -1;
+    else if (this.touchButtonsJust.has('dash_right')) dashDir = 1;
+
+    const grapple =
+      this.mouseScreen.rightDown || this.heldKeys.has('KeyC') || this.touchButtonsJust.has('grapple');
+    const grappleJust =
+      this.justPressed.has('MouseRight') ||
+      this.justPressed.has('KeyC') ||
+      this.touchButtonsJust.has('grapple');
+    const emoteJust = this.justPressed.has('KeyT') || this.touchButtonsJust.has('emote');
+    const sprayJust = this.justPressed.has('KeyY') || this.touchButtonsJust.has('spray');
+
     return {
       left,
       right,
@@ -1334,6 +1996,11 @@ export class ArenaGameEngine {
       cycleGrenadeJust,
       switchSlot,
       aimAngle,
+      grapple,
+      grappleJust,
+      dashDir,
+      emoteJust,
+      sprayJust,
     };
   }
 
@@ -1362,6 +2029,15 @@ export class ArenaGameEngine {
       switchSlot = order[(order.indexOf(f.activeSlot) + 1) % order.length];
     }
 
+    let dashDir: -1 | 0 | 1 = 0;
+    if (this.justPressed.has('ArrowLeft')) {
+      if (this.elapsedSec - f.lastTapLeftAt <= 0.26) dashDir = -1;
+      f.lastTapLeftAt = this.elapsedSec;
+    } else if (this.justPressed.has('ArrowRight')) {
+      if (this.elapsedSec - f.lastTapRightAt <= 0.26) dashDir = 1;
+      f.lastTapRightAt = this.elapsedSec;
+    }
+
     let ax = 0;
     let ay = 0;
     if (left) ax -= 1;
@@ -1384,6 +2060,11 @@ export class ArenaGameEngine {
       cycleGrenadeJust,
       switchSlot,
       aimAngle,
+      grapple: this.heldKeys.has('KeyN'),
+      grappleJust: this.justPressed.has('KeyN'),
+      dashDir,
+      emoteJust: this.justPressed.has('Comma'),
+      sprayJust: this.justPressed.has('Semicolon'),
     };
   }
 
@@ -1553,7 +2234,9 @@ export class ArenaGameEngine {
       bot.ultCharge >= 100 &&
       Math.random() < 0.035 &&
       ((nearestEnemy && nearestDist < 360) ||
-        ((bot.characterId === 'yogi_boy' || bot.characterId === 'dashing_trudeau') &&
+        ((bot.characterId === 'baba_wifi' ||
+          bot.characterId === 'bhaijaan_gymbro' ||
+          bot.characterId === 'captain_jalebi') &&
           bot.hp < 45));
 
     const reload = bot.ammo <= 0 && !bot.isReloading;
@@ -1571,6 +2254,11 @@ export class ArenaGameEngine {
       grenadeJust,
       cycleGrenadeJust: false,
       aimAngle,
+      grapple: false,
+      grappleJust: false,
+      dashDir: 0 as -1 | 0 | 1,
+      emoteJust: false,
+      sprayJust: false,
     };
   }
 
@@ -1580,26 +2268,21 @@ export class ArenaGameEngine {
     this.triggerSpeechQuip(f, 'ult');
     this.pendingNetEvents.push({ kind: 'ult', x: f.x, y: f.y, text: f.characterId });
 
-    if (
-      f.characterId === 'mitron' ||
-      f.characterId === 'dashing_trudeau' ||
-      f.characterId === 'thongi_baba'
-    ) {
-      const isTrudeau = f.characterId === 'dashing_trudeau';
+    if (f.characterId === 'chai_storm' || f.characterId === 'thongi_baba') {
       const isThongi = f.characterId === 'thongi_baba';
-      const blastRadius = isThongi ? 275 : isTrudeau ? 230 : 250;
-      const blastDmg = isThongi ? 46 : isTrudeau ? 34 : 42;
+      const blastRadius = isThongi ? 275 : 260;
+      const blastDmg = isThongi ? 46 : 44;
       if (isThongi) {
         this.spawnFloatingText(f.x, f.y - 45, 'YAHAN WALA BLAST!', '#22D3EE');
         this.spawnRing(f.x, f.y, blastRadius * 0.72, '#FACC15');
         this.spawnBurst(f.x, f.y, '#22D3EE', 18, 280);
-      } else if (isTrudeau) {
-        f.hp = Math.min(f.maxHp, f.hp + 30);
-        this.spawnFloatingText(f.x, f.y - 45, '+30 HP MAPLE FLASH!', '#F43F5E');
       } else {
-        this.spawnFloatingText(f.x, f.y - 45, 'MANN KI BLAST!', '#F59E0B');
+        this.spawnFloatingText(f.x, f.y - 45, 'KADAK SHOCKWAVE!', '#FDE68A');
+        this.spawnRing(f.x, f.y, blastRadius * 0.72, '#D97706');
+        this.spawnBurst(f.x, f.y, '#FEF3C7', 20, 260, 'smoke');
+        this.spawnBurst(f.x, f.y, '#B45309', 14, 290);
       }
-      this.spawnRing(f.x, f.y, blastRadius, isThongi ? '#22D3EE' : isTrudeau ? '#F43F5E' : '#F59E0B');
+      this.spawnRing(f.x, f.y, blastRadius, isThongi ? '#22D3EE' : '#F59E0B');
 
       for (const other of this.fighters) {
         if (other.id === f.id || !other.alive || this.isFriendly(f, other)) continue;
@@ -1607,52 +2290,62 @@ export class ArenaGameEngine {
         const dy = other.y - f.y;
         const dist = Math.hypot(dx, dy);
         if (dist <= blastRadius) {
-          const push = (1 - dist / blastRadius) * (isThongi ? 680 : 620) + (isThongi ? 260 : 220);
+          const push = (1 - dist / blastRadius) * (isThongi ? 680 : 650) + 250;
           const ang = Math.atan2(dy - 40, dx);
           other.vx += Math.cos(ang) * push;
-          other.vy += Math.sin(ang) * push - 150;
+          other.vy += Math.sin(ang) * push - 160;
           this.applyDamage(other, blastDmg, f.id, 'ultimate', false);
         }
       }
-    } else if (f.characterId === 'tariff_boss') {
-      const wallX = f.x + f.facing * 44 - 11;
-      const wallY = f.y - 48;
-      this.tempWalls.push({
-        id: `tw_${this.nextWallId++}`,
-        ownerId: f.id,
-        x: wallX,
-        y: wallY,
-        w: 22,
-        h: 92,
-        hp: 260,
-        maxHp: 260,
-        life: 8.5,
-      });
-      this.spawnFloatingText(f.x, f.y - 45, 'GOLDEN WALL!', '#FACC15');
-    } else if (f.characterId === 'revolutionary') {
+    } else if (f.characterId === 'baron_voltage') {
+      const empRadius = 310;
+      f.ultActiveTimer = 0.75;
+      soundEngine.playEmpShock();
+      this.spawnRing(f.x, f.y, empRadius, '#22D3EE');
+      this.spawnRing(f.x, f.y, empRadius * 0.58, '#67E8F9');
+      this.spawnBurst(f.x, f.y, '#67E8F9', 24, 340);
+      this.spawnFloatingText(f.x, f.y - 45, 'ARCANE EMP STORM!', '#22D3EE');
+      for (const other of this.fighters) {
+        if (other.id === f.id || !other.alive || this.isFriendly(f, other)) continue;
+        const dist = Math.hypot(other.x - f.x, other.y - f.y);
+        if (dist <= empRadius) {
+          this.spawnBurst(other.x, other.y - 4, '#22D3EE', 10, 180);
+          this.applyDamage(other, 40, f.id, 'ultimate', false);
+          if (other.alive) {
+            if (other.characterId !== 'baron_voltage') {
+              other.empDisableTimer = Math.max(other.empDisableTimer, 3.2);
+              this.spawnFloatingText(other.x, other.y - 42, 'EMP SHOCKED!', '#22D3EE');
+            }
+            other.empDotTimer = Math.max(other.empDotTimer, 3.0);
+            other.empTickAccum = 0;
+            other.empOwnerId = f.id;
+          }
+        }
+      }
+    } else if (f.characterId === 'captain_jalebi') {
       f.ultActiveTimer = 6.0;
       f.fuel = f.maxFuel;
-      this.spawnFloatingText(f.x, f.y - 45, 'BHARAT SPRINT!', '#38BDF8');
-    } else if (f.characterId === 'yogi_boy') {
+      this.spawnFloatingText(f.x, f.y - 45, 'SUGAR RUSH OVERDRIVE!', '#FB923C');
+    } else if (f.characterId === 'baba_wifi') {
       f.ultActiveTimer = 5.0;
-      this.spawnFloatingText(f.x, f.y - 45, 'BULLDOZER RUSH!', '#FB923C');
-    } else if (f.characterId === 'red_dragon') {
+      this.spawnFloatingText(f.x, f.y - 45, 'FIREWALL SHIELD!', '#22D3EE');
+    } else if (f.characterId === 'general_noodle') {
       const target = this.findNearestEnemy(f);
-      this.spawnFloatingText(f.x, f.y - 45, 'DRONE SWARM!', '#EF4444');
-      for (let i = 0; i < 2; i++) {
-        const ang = f.aimAngle + (i === 0 ? -0.35 : 0.35);
+      this.spawnFloatingText(f.x, f.y - 45, 'SPICY NOODLE SWARM!', '#EF4444');
+      for (const offset of [-0.42, 0, 0.42]) {
+        const ang = f.aimAngle + offset;
         this.projectiles.push({
           id: this.nextProjectileId++,
           ownerId: f.id,
           weaponId: f.weaponId,
           x: f.x + f.facing * 16,
-          y: f.y - 12 + (i === 0 ? -8 : 8),
+          y: f.y - 12 + offset * 14,
           prevX: f.x,
           prevY: f.y - 12,
-          vx: Math.cos(ang) * 440,
-          vy: Math.sin(ang) * 440,
-          damage: 38,
-          explosionRadius: 72,
+          vx: Math.cos(ang) * 450,
+          vy: Math.sin(ang) * 450,
+          damage: 34,
+          explosionRadius: 70,
           color: '#EF4444',
           life: 3.6,
           isRocket: true,
@@ -1661,13 +2354,146 @@ export class ArenaGameEngine {
           fromUltimate: true,
         });
       }
-    } else if (f.characterId === 'iron_bear') {
-      f.ultActiveTimer = 6.0;
-      this.spawnFloatingText(f.x, f.y - 45, 'HEAVY RECOIL (2X DMG)!', '#EF4444');
+    } else if (f.characterId === 'agent_404') {
+      soundEngine.playGlitchTeleport();
+      this.spawnBurst(f.x, f.y, '#22C55E', 18, 220);
+      const target = this.findNearestEnemy(f);
+      if (target) {
+        const spots = [
+          { x: target.x - target.facing * 54, y: target.y },
+          { x: target.x + target.facing * 54, y: target.y },
+          { x: target.x, y: target.y - 42 },
+        ];
+        for (const sp of spots) {
+          const cx = Math.max(58, Math.min(this.map.width - 58, sp.x));
+          const cy = Math.max(70, Math.min(this.map.height - 90, sp.y));
+          const blocked = this.getActivePlatforms().some(
+            (p) =>
+              p.kind !== 'oneway' &&
+              this.rectOverlap(cx - f.w / 2, cy - f.h / 2, f.w, f.h, p.x, p.y, p.w, p.h)
+          );
+          if (!blocked) {
+            f.x = cx;
+            f.y = cy;
+            break;
+          }
+        }
+        f.facing = target.x >= f.x ? 1 : -1;
+        f.aimAngle = Math.atan2(target.y - f.y, target.x - f.x);
+      }
+      f.ultActiveTimer = 5.0;
+      this.spawnBurst(f.x, f.y, '#4ADE80', 18, 240);
+      this.spawnFloatingText(f.x, f.y - 45, 'GLITCH TELEPORT (404)!', '#4ADE80');
+    } else if (f.characterId === 'prof_jugaad') {
+      soundEngine.playCookerWhistle();
+      this.cookerBombs.push({
+        id: this.nextCookerId++,
+        ownerId: f.id,
+        x: f.x + f.facing * 18,
+        y: f.y,
+        vx: f.facing * 185,
+        vy: -130,
+        fuseTimer: 1.5,
+        maxFuse: 1.5,
+        whistleTimer: 0.35,
+      });
+      this.spawnFloatingText(f.x, f.y - 45, 'SEETI BLAST INCOMING!', '#FACC15');
+    } else if (f.characterId === 'chappal_ninja') {
+      const target = this.findNearestEnemy(f);
+      const ang = target ? Math.atan2(target.y - f.y, target.x - f.x) : f.aimAngle;
+      this.projectiles.push({
+        id: this.nextProjectileId++,
+        ownerId: f.id,
+        weaponId: f.weaponId,
+        x: f.x + Math.cos(ang) * 20,
+        y: f.y - 6 + Math.sin(ang) * 20,
+        prevX: f.x,
+        prevY: f.y - 6,
+        vx: Math.cos(ang) * 620,
+        vy: Math.sin(ang) * 620,
+        damage: 64,
+        explosionRadius: 0,
+        color: '#FACC15',
+        life: 4.0,
+        isRocket: false,
+        isHoming: true,
+        isChappal: true,
+        bouncesLeft: 3,
+        targetId: target ? target.id : null,
+        fromUltimate: true,
+      });
+      this.spawnFloatingText(f.x, f.y - 45, 'FLYING CHAPPAL!', '#FACC15');
+    } else if (f.characterId === 'dj_dholak') {
+      soundEngine.playBassDrop();
+      const radius = 270;
+      this.spawnRing(f.x, f.y, radius, '#EC4899');
+      this.spawnRing(f.x, f.y, radius * 0.65, '#22D3EE');
+      this.spawnFloatingText(f.x, f.y - 45, 'BARAAT BASS DROP!', '#EC4899');
+      for (const other of this.fighters) {
+        if (other.id === f.id || !other.alive || this.isFriendly(f, other)) continue;
+        const dist = Math.hypot(other.x - f.x, other.y - f.y);
+        if (dist <= radius) {
+          other.danceTimer = Math.max(other.danceTimer, 2.0);
+          other.vy = Math.min(other.vy, -210);
+          this.spawnFloatingText(other.x, other.y - 42, 'DANCE!', '#EC4899');
+          this.applyDamage(other, 38, f.id, 'ultimate', false);
+        }
+      }
+    } else if (f.characterId === 'aunty_cctv') {
+      f.uavTimer = Math.max(f.uavTimer, 8.0);
+      f.ultActiveTimer = 8.0;
+      f.gossipCooldown = 0.05;
+      this.spawnFloatingText(f.x, f.y - 45, 'MOHALLA BROADCAST!', '#F472B6');
+    } else if (f.characterId === 'bhaijaan_gymbro') {
+      f.vy = -560;
+      f.grounded = false;
+      f.slamPending = true;
+      f.ultActiveTimer = 2.2;
+      this.spawnBurst(f.x, f.y + 18, '#F97316', 14, 190);
+      this.spawnFloatingText(f.x, f.y - 45, 'SKIP LEG DAY SMASH!', '#F97316');
+    } else if (f.characterId === 'exam_topper') {
+      soundEngine.playLaserZap();
+      const beamLen = 920;
+      const sx = f.x;
+      const sy = f.y - 4;
+      const dx = Math.cos(f.aimAngle);
+      const dy = Math.sin(f.aimAngle);
+      this.geometryBeams.push({
+        id: this.nextBeamId++,
+        ownerId: f.id,
+        x: sx,
+        y: sy,
+        angle: f.aimAngle,
+        length: beamLen,
+        life: 0.55,
+        maxLife: 0.55,
+        color: '#38BDF8',
+        isGossip: false,
+      });
+      this.spawnFloatingText(f.x, f.y - 45, '100/100 GEOMETRY LASER!', '#38BDF8');
+
+      for (const other of this.fighters) {
+        if (other.id === f.id || !other.alive || this.isFriendly(f, other)) continue;
+        const vx = other.x - sx;
+        const vy = other.y - sy;
+        const projDist = vx * dx + vy * dy;
+        if (projDist >= 0 && projDist <= beamLen) {
+          const perpDist = Math.abs(vx * dy - vy * dx);
+          if (perpDist <= 28) {
+            this.spawnBurst(other.x, other.y, '#38BDF8', 12, 200);
+            this.applyDamage(other, 78, f.id, 'ultimate', false);
+          }
+        }
+      }
     }
   }
 
   private switchFighterSlot(f: FighterEntity, targetSlot: WeaponSlot): void {
+    if (f.isLastStand) return;
+    if (this.rules.gameMode === 'gun_game') {
+      const wantSlot = f.gunGameTier >= GUN_GAME_LADDER.length ? 'melee' : 'primary';
+      if (targetSlot !== wantSlot) return;
+    }
     if (f.activeSlot === targetSlot) return;
     if (f.activeSlot === 'primary') {
       f.primaryAmmo = f.ammo;
@@ -1704,7 +2530,8 @@ export class ArenaGameEngine {
   private performMeleeStrike(f: FighterEntity): void {
     const meleeId = f.meleeWeaponId || 'knife';
     const mDef = MELEE_WEAPONS[meleeId] || MELEE_WEAPONS.knife;
-    f.meleeCooldownTimer = mDef.cooldownSec;
+    f.meleeCooldownTimer =
+      f.characterId === 'chappal_ninja' ? mDef.cooldownSec * 0.8 : mDef.cooldownSec;
     f.meleeSwingTimer = mDef.swingDurationSec;
     soundEngine.playMeleeSwing(meleeId);
     this.pendingNetEvents.push({ kind: 'melee', meleeWeaponId: meleeId, x: f.x, y: f.y });
@@ -1713,12 +2540,13 @@ export class ArenaGameEngine {
     const reachX = f.x + Math.cos(f.aimAngle) * reachOffset;
     const reachY = f.y - 4 + Math.sin(f.aimAngle) * reachOffset;
     const hitRadius = Math.max(42, mDef.range * 0.92);
+    const knockMult = f.characterId === 'bhaijaan_gymbro' ? 1.35 : 1.0;
     let landed = false;
 
     for (const other of this.fighters) {
       if (other.id === f.id || !other.alive || this.isFriendly(f, other)) continue;
       if (Math.hypot(other.x - reachX, other.y - reachY) < hitRadius) {
-        other.vx += Math.cos(f.aimAngle) * mDef.knockback;
+        other.vx += Math.cos(f.aimAngle) * mDef.knockback * knockMult;
         other.vy = Math.min(other.vy - 120, -160);
         this.applyDamage(other, mDef.damage, f.id, meleeId, false);
         landed = true;
@@ -1812,61 +2640,82 @@ export class ArenaGameEngine {
 
         if (!g.stuck) {
           let collided = false;
+          // Portal teleportation for grenades
+          for (const prt of this.portals) {
+            if (Math.hypot(nextX - prt.aX, nextY - prt.aY) < prt.radius) {
+              g.x = prt.bX + Math.sign(g.vx || 1) * (prt.radius + 14);
+              g.y = prt.bY;
+              soundEngine.playPortalWarp();
+              this.spawnBurst(g.x, g.y, '#FB923C', 8, 130);
+              collided = true;
+              break;
+            } else if (Math.hypot(nextX - prt.bX, nextY - prt.bY) < prt.radius) {
+              g.x = prt.aX + Math.sign(g.vx || 1) * (prt.radius + 14);
+              g.y = prt.aY;
+              soundEngine.playPortalWarp();
+              this.spawnBurst(g.x, g.y, '#38BDF8', 8, 130);
+              collided = true;
+              break;
+            }
+          }
+
           // Bounce or stick against solid platforms
-          for (const p of this.map.platforms) {
-            if (p.kind === 'oneway') {
+          if (!collided) {
+            for (const p of this.getActivePlatforms()) {
+              if (p.kind === 'oneway') {
+                if (
+                  g.vy > 0 &&
+                  g.y <= p.y &&
+                  nextY + 6 >= p.y &&
+                  nextX >= p.x &&
+                  nextX <= p.x + p.w
+                ) {
+                  if (g.type === 'plasma') {
+                    g.stuck = true;
+                    g.x = nextX;
+                    g.y = p.y - 6;
+                    g.vx = 0;
+                    g.vy = 0;
+                    soundEngine.playPlasmaStick();
+                  } else {
+                    g.y = p.y - 6;
+                    g.vy = -g.vy * 0.48;
+                    g.vx *= 0.72;
+                    soundEngine.playGrenadeBounce();
+                  }
+                  collided = true;
+                  break;
+                }
+                continue;
+              }
               if (
-                g.vy > 0 &&
-                g.y <= p.y &&
-                nextY + 6 >= p.y &&
-                nextX >= p.x &&
-                nextX <= p.x + p.w
+                nextX + 6 > p.x &&
+                nextX - 6 < p.x + p.w &&
+                nextY + 6 > p.y &&
+                nextY - 6 < p.y + p.h
               ) {
                 if (g.type === 'plasma') {
                   g.stuck = true;
-                  g.x = nextX;
-                  g.y = p.y - 6;
                   g.vx = 0;
                   g.vy = 0;
                   soundEngine.playPlasmaStick();
                 } else {
-                  g.y = p.y - 6;
-                  g.vy = -g.vy * 0.48;
-                  g.vx *= 0.72;
+                  const overlapL = nextX + 6 - p.x;
+                  const overlapR = p.x + p.w - (nextX - 6);
+                  const overlapT = nextY + 6 - p.y;
+                  const overlapB = p.y + p.h - (nextY - 6);
+                  const minO = Math.min(overlapL, overlapR, overlapT, overlapB);
+                  if (minO === overlapT || minO === overlapB) {
+                    g.vy = -g.vy * 0.5;
+                    g.vx *= 0.75;
+                  } else {
+                    g.vx = -g.vx * 0.55;
+                  }
                   soundEngine.playGrenadeBounce();
                 }
                 collided = true;
                 break;
               }
-              continue;
-            }
-            if (
-              nextX + 6 > p.x &&
-              nextX - 6 < p.x + p.w &&
-              nextY + 6 > p.y &&
-              nextY - 6 < p.y + p.h
-            ) {
-              if (g.type === 'plasma') {
-                g.stuck = true;
-                g.vx = 0;
-                g.vy = 0;
-                soundEngine.playPlasmaStick();
-              } else {
-                const overlapL = nextX + 6 - p.x;
-                const overlapR = p.x + p.w - (nextX - 6);
-                const overlapT = nextY + 6 - p.y;
-                const overlapB = p.y + p.h - (nextY - 6);
-                const minO = Math.min(overlapL, overlapR, overlapT, overlapB);
-                if (minO === overlapT || minO === overlapB) {
-                  g.vy = -g.vy * 0.5;
-                  g.vx *= 0.75;
-                } else {
-                  g.vx = -g.vx * 0.55;
-                }
-                soundEngine.playGrenadeBounce();
-              }
-              collided = true;
-              break;
             }
           }
           if (!collided) {
@@ -1877,6 +2726,8 @@ export class ArenaGameEngine {
       }
 
       if (g.fuseTimer <= 0) {
+        const owner = this.fighters.find((ft) => ft.id === g.ownerId);
+        const blastMult = owner?.characterId === 'prof_jugaad' ? 1.2 : 1.0;
         if (g.type === 'smoke') {
           this.smokeClouds.push({
             id: this.nextSmokeId++,
@@ -1889,9 +2740,9 @@ export class ArenaGameEngine {
           soundEngine.playSmokeHiss();
           this.spawnBurst(g.x, g.y, '#CBD5E1', 16, 150);
         } else if (g.type === 'plasma') {
-          this.triggerExplosion(g.x, g.y, 118, 95, g.ownerId, 'plasma');
+          this.triggerExplosion(g.x, g.y, 118 * blastMult, 95, g.ownerId, 'plasma');
         } else {
-          this.triggerExplosion(g.x, g.y, 124, 82, g.ownerId, 'frag');
+          this.triggerExplosion(g.x, g.y, 124 * blastMult, 82, g.ownerId, 'frag');
         }
       } else {
         kept.push(g);
@@ -1899,6 +2750,78 @@ export class ArenaGameEngine {
     }
 
     this.grenades = kept;
+  }
+
+  private updateCookerBombs(dt: number): void {
+    const gAccel = GRAVITY * this.rules.gravityScale;
+    const kept: CookerBombEntity[] = [];
+
+    for (const cb of this.cookerBombs) {
+      cb.fuseTimer -= dt;
+      cb.whistleTimer -= dt;
+      if (cb.whistleTimer <= 0 && cb.fuseTimer > 0.15) {
+        cb.whistleTimer = 0.35;
+        soundEngine.playCookerWhistle();
+        this.spawnBurst(cb.x, cb.y - 12, '#F8FAFC', 4, 85, 'smoke');
+      }
+
+      cb.vy += gAccel * dt;
+      const nextX = cb.x + cb.vx * dt;
+      const nextY = cb.y + cb.vy * dt;
+      let landed = false;
+
+      for (const p of this.getActivePlatforms()) {
+        if (p.kind === 'oneway') {
+          if (cb.vy > 0 && cb.y <= p.y && nextY + 12 >= p.y && nextX >= p.x && nextX <= p.x + p.w) {
+            cb.y = p.y - 12;
+            cb.vy = -cb.vy * 0.25;
+            cb.vx *= 0.65;
+            landed = true;
+            break;
+          }
+          continue;
+        }
+        if (nextX + 12 > p.x && nextX - 12 < p.x + p.w && nextY + 12 > p.y && nextY - 12 < p.y + p.h) {
+          cb.y = p.y - 12;
+          cb.vy = -cb.vy * 0.25;
+          cb.vx *= 0.65;
+          landed = true;
+          break;
+        }
+      }
+
+      if (!landed) {
+        cb.x = Math.max(52, Math.min(this.map.width - 52, nextX));
+        cb.y = Math.min(this.map.height - 62, nextY);
+      }
+
+      if (cb.fuseTimer <= 0) {
+        this.triggerExplosion(cb.x, cb.y, 225, 76, cb.ownerId, 'ultimate');
+        this.spawnRing(cb.x, cb.y, 230, '#FACC15');
+        const confettiColors = ['#F43F5E', '#FACC15', '#38BDF8', '#22C55E', '#A855F7'];
+        for (const c of confettiColors) {
+          this.spawnBurst(cb.x, cb.y - 8, c, 5, 320);
+        }
+        for (const f of this.fighters) {
+          if (!f.alive) continue;
+          const dist = Math.hypot(f.x - cb.x, f.y - cb.y);
+          if (dist <= 225) {
+            f.vy -= 260;
+          }
+        }
+      } else {
+        kept.push(cb);
+      }
+    }
+
+    this.cookerBombs = kept;
+  }
+
+  private updateGeometryBeams(dt: number): void {
+    for (const bm of this.geometryBeams) {
+      bm.life -= dt;
+    }
+    this.geometryBeams = this.geometryBeams.filter((bm) => bm.life > 0);
   }
 
   private updateSmokeClouds(dt: number): void {
@@ -1954,6 +2877,25 @@ export class ArenaGameEngine {
       this.updateDomination(dt);
     } else if (gm === 'ctf') {
       this.updateCtf(dt);
+    } else if (gm === 'boss_raid') {
+      const boss = this.fighters.find((f) => f.isBoss && f.alive);
+      if (boss) {
+        boss.bossEmpTimer -= dt;
+        if (boss.bossEmpTimer <= 0) {
+          boss.bossEmpTimer = 8.5;
+          soundEngine.playEmpShock();
+          this.spawnRing(boss.x, boss.y, 260, '#22D3EE');
+          this.spawnBurst(boss.x, boss.y, '#67E8F9', 22, 300);
+          this.spawnFloatingText(boss.x, boss.y - 54, 'MEGA EMP STORM!', '#22D3EE');
+          for (const f of this.fighters) {
+            if (!f.alive || f.id === boss.id || (f.team || 'alpha') === (boss.team || 'bravo')) continue;
+            if (Math.hypot(f.x - boss.x, f.y - boss.y) <= 260) {
+              f.empDisableTimer = Math.max(f.empDisableTimer, 1.8);
+              this.applyDamage(f, 24, boss.id, 'emp', false);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -2243,9 +3185,19 @@ export class ArenaGameEngine {
       f.onLadder = false;
     }
 
-    const speedBonus = f.characterId === 'revolutionary' ? 1.12 : 1.0;
-    const ultSpeedMult = f.characterId === 'revolutionary' && f.ultActiveTimer > 0 ? 1.48 : 1.0;
+    const speedBonus =
+      f.characterId === 'captain_jalebi'
+        ? 1.12
+        : f.characterId === 'chappal_ninja'
+        ? 1.1
+        : 1.0;
+    const ultSpeedMult = f.characterId === 'captain_jalebi' && f.ultActiveTimer > 0 ? 2.0 : 1.0;
     const buffSpeedMult = f.speedBuffTimer > 0 ? 1.38 : 1.0;
+    const chaosFrenzyMult =
+      this.chaosState.phase === 'active' && this.chaosState.eventType === 'hyper_frenzy'
+        ? 1.5
+        : 1.0;
+    const lastStandMoveMult = f.isLastStand ? 0.42 : 1.0;
 
     // Water Pool drag check
     let inWaterNow = false;
@@ -2275,24 +3227,49 @@ export class ArenaGameEngine {
     const iceFriction = standingOnIce ? 2.4 : 14.5;
 
     const botPace = f.isHuman ? 1.0 : 0.84;
-    const maxRun = BASE_RUN_SPEED * speedBonus * ultSpeedMult * buffSpeedMult * waterMult * botPace;
+    const freezeMoveMult = f.freezeTimer > 0 ? 0.55 : 1.0;
+    const minigunMoveMult =
+      f.weaponId === 'minigun' && f.activeSlot === 'primary' && f.minigunSpinTimer > 0.05
+        ? 0.78
+        : 1.0;
+    const maxRun =
+      BASE_RUN_SPEED *
+      speedBonus *
+      ultSpeedMult *
+      buffSpeedMult *
+      chaosFrenzyMult *
+      lastStandMoveMult *
+      waterMult *
+      botPace *
+      freezeMoveMult *
+      minigunMoveMult;
 
     const moveDir = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-    const accel = (f.grounded ? MOVE_ACCEL_GROUND * iceAccelMult : MOVE_ACCEL_AIR) * speedBonus * ultSpeedMult * buffSpeedMult;
+    const accel =
+      (f.grounded ? MOVE_ACCEL_GROUND * iceAccelMult : MOVE_ACCEL_AIR) *
+      speedBonus *
+      ultSpeedMult *
+      buffSpeedMult *
+      chaosFrenzyMult *
+      lastStandMoveMult *
+      freezeMoveMult *
+      minigunMoveMult;
 
-    if (moveDir !== 0) {
-      f.vx += moveDir * accel * dt;
-      if (Math.abs(f.vx) > maxRun) {
-        f.vx += (moveDir * maxRun - f.vx) * Math.min(1, dt * 10);
+    if (f.dashTimer <= 0) {
+      if (moveDir !== 0) {
+        f.vx += moveDir * accel * dt;
+        if (Math.abs(f.vx) > maxRun) {
+          f.vx += (moveDir * maxRun - f.vx) * Math.min(1, dt * 10);
+        }
+        if (f.grounded) {
+          f.walkCycle += dt * (Math.abs(f.vx) / 28);
+        }
+      } else if (f.grounded) {
+        f.vx -= f.vx * Math.min(1, dt * iceFriction);
+        if (Math.abs(f.vx) < 4) f.vx = 0;
+      } else {
+        f.vx -= f.vx * Math.min(1, dt * 1.6);
       }
-      if (f.grounded) {
-        f.walkCycle += dt * (Math.abs(f.vx) / 28);
-      }
-    } else if (f.grounded) {
-      f.vx -= f.vx * Math.min(1, dt * iceFriction);
-      if (Math.abs(f.vx) < 4) f.vx = 0;
-    } else {
-      f.vx -= f.vx * Math.min(1, dt * 1.6);
     }
 
     if (f.grounded) {
@@ -2307,44 +3284,84 @@ export class ArenaGameEngine {
     }
 
     f.jetpacking = false;
-    const rapidUltFuel = f.characterId === 'revolutionary' && f.ultActiveTimer > 0;
-    const trudeauFuel = f.characterId === 'dashing_trudeau';
+    const rapidUltFuel = f.characterId === 'captain_jalebi' && f.ultActiveTimer > 0;
+    const topperFuel = f.characterId === 'exam_topper';
     const fuelEfficiency =
       this.rules.infiniteFuel || rapidUltFuel
         ? 0.0
         : f.fuelBuffTimer > 0 || f.rapidJetTimer > 0
         ? 0.35
         : 1.0;
-    const gravityAccel = GRAVITY * this.rules.gravityScale;
+    const zeroGravMult =
+      this.chaosState.phase === 'active' && this.chaosState.eventType === 'zero_gravity'
+        ? 0.3
+        : 1.0;
+    const gravityAccel = GRAVITY * this.rules.gravityScale * zeroGravMult;
 
-    if (f.onLadder) {
+    if (f.onLadder && !f.isLastStand) {
       f.vy = 0;
       if (input.up) f.vy = -210;
       if (input.down) f.vy = 210;
       f.wallSlideDir = 0;
     } else {
-      // Jump or Wall-Jump!
-      if (input.upJust && f.coyoteTimer > 0) {
-        f.vy = JUMP_VELOCITY;
-        f.grounded = false;
-        f.coyoteTimer = 0;
-        f.wallSlideDir = 0;
-      } else if (input.upJust && !f.grounded && f.wallSlideDir !== 0) {
-        f.vy = JUMP_VELOCITY * 0.96;
-        f.vx = -f.wallSlideDir * 365;
-        f.wallSlideDir = 0;
-        this.spawnBurst(f.x, f.y, '#CBD5E1', 5, 110);
-      } else if (input.up && f.fuel > 0 && f.vy > MAX_JETPACK_RISE) {
-        f.jetpacking = true;
-        f.vy += JETPACK_ACCEL * dt;
-        if (f.vy < MAX_JETPACK_RISE) f.vy = MAX_JETPACK_RISE;
-        f.fuel = Math.max(0, f.fuel - 36 * fuelEfficiency * dt);
-        this.spawnJetpackFlame(f);
-        if (f.isHuman) soundEngine.playJetpack();
+      const jetFreezeScale = f.freezeTimer > 0 ? 0.55 : 1.0;
+      const maxJetRise = MAX_JETPACK_RISE * jetFreezeScale;
+      if (!f.isLastStand) {
+        // Jump or Wall-Jump!
+        if (input.upJust && f.coyoteTimer > 0) {
+          f.vy = JUMP_VELOCITY;
+          f.grounded = false;
+          f.coyoteTimer = 0;
+          f.wallSlideDir = 0;
+        } else if (input.upJust && !f.grounded && f.wallSlideDir !== 0) {
+          f.vy = JUMP_VELOCITY * 0.96;
+          f.vx = -f.wallSlideDir * 365;
+          f.wallSlideDir = 0;
+          this.spawnBurst(f.x, f.y, '#CBD5E1', 5, 110);
+        } else if (input.up && f.fuel > 0 && f.vy > maxJetRise && f.empDisableTimer <= 0) {
+          f.jetpacking = true;
+          f.vy += JETPACK_ACCEL * jetFreezeScale * dt;
+          if (f.vy < maxJetRise) f.vy = maxJetRise;
+          f.fuel = Math.max(0, f.fuel - 36 * fuelEfficiency * dt);
+          this.spawnJetpackFlame(f);
+          if (f.isHuman) soundEngine.playJetpack();
+        } else if (input.up && f.empDisableTimer > 0 && Math.random() < 0.14) {
+          this.spawnBurst(f.x - f.facing * 8, f.y + 4, '#22D3EE', 1, 80);
+        }
       }
 
       if (!f.jetpacking) {
         f.vy = Math.min(MAX_FALL_SPEED, f.vy + gravityAccel * dt);
+      }
+    }
+
+    // Grappling Hook reel force
+    if (f.grappleActive) {
+      const gx = f.grappleX - f.x;
+      const gy = f.grappleY - f.y;
+      const gDist = Math.hypot(gx, gy);
+      if (gDist < 34) {
+        f.grappleActive = false;
+      } else {
+        const pull = 1650;
+        f.vx += (gx / gDist) * pull * dt;
+        f.vy += (gy / gDist) * pull * dt;
+        f.vx = Math.max(-720, Math.min(720, f.vx));
+        f.vy = Math.max(-680, Math.min(680, f.vy));
+        f.grounded = false;
+      }
+    }
+
+    // Updraft Wind Vents
+    for (const wv of this.windVents) {
+      if (
+        f.x + f.w / 2 > wv.x &&
+        f.x - f.w / 2 < wv.x + wv.w &&
+        f.y <= wv.y + 10 &&
+        f.y >= wv.y - wv.height
+      ) {
+        f.vy = Math.max(-420, f.vy - 1850 * dt);
+        f.grounded = false;
       }
     }
 
@@ -2358,7 +3375,7 @@ export class ArenaGameEngine {
           ? 64
           : f.fuelBuffTimer > 0
           ? 44
-          : trudeauFuel
+          : topperFuel
           ? (f.grounded ? 42 : 16)
           : f.grounded
           ? 32
@@ -2371,8 +3388,9 @@ export class ArenaGameEngine {
     const halfW = f.w / 2;
     const halfH = f.h / 2;
     let collideXDir: -1 | 0 | 1 = 0;
+    const activePlatforms = this.getActivePlatforms();
 
-    for (const p of this.map.platforms) {
+    for (const p of activePlatforms) {
       if (p.kind === 'oneway') continue;
       if (this.rectOverlap(f.x - halfW, f.y - halfH, f.w, f.h, p.x, p.y, p.w, p.h)) {
         if (f.vx > 0) {
@@ -2420,7 +3438,7 @@ export class ArenaGameEngine {
     f.y += f.vy * dt;
     f.grounded = false;
 
-    for (const p of this.map.platforms) {
+    for (const p of activePlatforms) {
       if (p.kind === 'oneway') {
         if (
           f.dropThroughTimer <= 0 &&
@@ -2447,6 +3465,52 @@ export class ArenaGameEngine {
           f.y = p.y + p.h + halfH;
           f.vy = 0;
         }
+      }
+    }
+
+    // Breakable Glass Floors (oneway when alive)
+    for (const gf of this.glassFloors) {
+      if (!gf.alive) continue;
+      if (
+        f.dropThroughTimer <= 0 &&
+        f.vy >= 0 &&
+        prevBottom <= gf.y + 8 &&
+        f.x + halfW > gf.x + 2 &&
+        f.x - halfW < gf.x + gf.w - 2 &&
+        f.y + halfH >= gf.y &&
+        f.y + halfH <= gf.y + gf.h + 10
+      ) {
+        f.y = gf.y - halfH;
+        f.vy = 0;
+        f.grounded = true;
+      }
+    }
+
+    // Moving Subway Train riding / side-impact KO
+    if (this.subwayTrain && this.subwayTrain.active) {
+      const tr = this.subwayTrain;
+      const trTop = tr.y - tr.h;
+      if (
+        f.vy >= 0 &&
+        prevBottom <= trTop + 14 &&
+        f.x + halfW > tr.x &&
+        f.x - halfW < tr.x + tr.w &&
+        f.y + halfH >= trTop &&
+        f.y + halfH <= trTop + 26
+      ) {
+        f.y = trTop - halfH;
+        f.vy = 0;
+        f.x += tr.vx * dt;
+        f.grounded = true;
+      } else if (
+        !tr.hitIds.has(f.id) &&
+        this.rectOverlap(f.x - halfW, f.y - halfH, f.w, f.h, tr.x, trTop + 6, tr.w, tr.h - 6)
+      ) {
+        tr.hitIds.add(f.id);
+        f.vx = tr.dir * 620;
+        f.vy = -340;
+        this.spawnFloatingText(f.x, f.y - 38, 'TRAIN HIT!', '#EF4444');
+        this.applyDamage(f, 140, f.lastHitById || 'arena', 'train', false);
       }
     }
 
@@ -2478,6 +3542,51 @@ export class ArenaGameEngine {
       }
     }
 
+    // Pneumatic Jump Pads
+    for (const jp of this.jumpPads) {
+      if (
+        f.x + halfW > jp.x &&
+        f.x - halfW < jp.x + jp.w &&
+        f.y + halfH >= jp.y - 12 &&
+        f.y - halfH <= jp.y + 8 &&
+        f.vy >= -80
+      ) {
+        f.vy = -760;
+        f.grounded = false;
+        jp.compress = 1;
+        soundEngine.playJumpPad();
+        this.spawnBurst(jp.x + jp.w / 2, jp.y - 4, '#22D3EE', 10, 180);
+        this.pendingNetEvents.push({ kind: 'jump_pad', x: jp.x + jp.w / 2, y: jp.y });
+      }
+    }
+
+    // Two-Way Teleportation Portals
+    if (f.portalCooldown <= 0) {
+      for (const prt of this.portals) {
+        if (Math.hypot(f.x - prt.aX, f.y - prt.aY) <= prt.radius + 8) {
+          f.x = prt.bX;
+          f.y = prt.bY - 8;
+          f.portalCooldown = 0.85;
+          f.grappleActive = false;
+          soundEngine.playPortalWarp();
+          this.spawnBurst(prt.aX, prt.aY, '#38BDF8', 10, 170);
+          this.spawnBurst(prt.bX, prt.bY, '#FB923C', 10, 170);
+          this.pendingNetEvents.push({ kind: 'portal_warp', x: prt.bX, y: prt.bY });
+          break;
+        } else if (Math.hypot(f.x - prt.bX, f.y - prt.bY) <= prt.radius + 8) {
+          f.x = prt.aX;
+          f.y = prt.aY - 8;
+          f.portalCooldown = 0.85;
+          f.grappleActive = false;
+          soundEngine.playPortalWarp();
+          this.spawnBurst(prt.bX, prt.bY, '#FB923C', 10, 170);
+          this.spawnBurst(prt.aX, prt.aY, '#38BDF8', 10, 170);
+          this.pendingNetEvents.push({ kind: 'portal_warp', x: prt.aX, y: prt.aY });
+          break;
+        }
+      }
+    }
+
     // Wall-Sliding state check
     if (!f.grounded && !f.onLadder && f.vy > 45 && collideXDir !== 0 && moveDir === collideXDir) {
       f.wallSlideDir = collideXDir;
@@ -2494,12 +3603,34 @@ export class ArenaGameEngine {
       f.vy = 0;
       f.grounded = true;
     }
+
+    if (f.grounded && f.slamPending) {
+      f.slamPending = false;
+      soundEngine.playSlamImpact();
+      for (const cam of this.cameras) {
+        cam.shake = Math.max(cam.shake, 14);
+      }
+      this.spawnRing(f.x, f.y + halfH, 260, '#F97316');
+      this.spawnDebris(f.x, f.y + halfH, '#78350F', 14, 'debris');
+      this.spawnFloatingText(f.x, f.y - 36, 'SEISMIC SLAM!', '#F97316');
+      for (const other of this.fighters) {
+        if (other.id === f.id || !other.alive || this.isFriendly(f, other)) continue;
+        const dist = Math.hypot(other.x - f.x, other.y - f.y);
+        if (dist <= 280) {
+          other.vy = -310;
+          other.vx += (other.x >= f.x ? 1 : -1) * 340;
+          other.stunTimer = Math.max(other.stunTimer, 0.9);
+          this.spawnFloatingText(other.x, other.y - 40, 'SMASHED!', '#FACC15');
+          this.applyDamage(other, 55, f.id, 'ultimate', false);
+        }
+      }
+    }
   }
 
   private isStandingOnIce(f: FighterEntity): boolean {
     if (!f.grounded) return false;
     const feetY = f.y + f.h / 2;
-    for (const p of this.map.platforms) {
+    for (const p of this.getActivePlatforms()) {
       if (p.style !== 'ice') continue;
       if (f.x + f.w / 2 > p.x && f.x - f.w / 2 < p.x + p.w && Math.abs(feetY - p.y) <= 5) {
         return true;
@@ -2513,10 +3644,15 @@ export class ArenaGameEngine {
     input: { shoot: boolean; reload: boolean },
     dt: number
   ): void {
-    f.fireCooldownMs = Math.max(0, f.fireCooldownMs - dt * 1000);
+    const frenzyRate =
+      this.chaosState.phase === 'active' && this.chaosState.eventType === 'hyper_frenzy'
+        ? 1.5
+        : 1.0;
+    f.fireCooldownMs = Math.max(0, f.fireCooldownMs - dt * 1000 * frenzyRate);
 
     // Dual-Wield Firing Branch
-    if (f.dualWield) {
+    if (f.dualWield && !f.isLastStand) {
+      f.minigunSpinTimer = Math.max(0, f.minigunSpinTimer - dt * 2.2);
       if (input.shoot && f.fireCooldownMs <= 0) {
         const isSmgs = f.dualWield === 'dual_smgs';
         f.fireCooldownMs = isSmgs ? 88 : 205;
@@ -2526,7 +3662,8 @@ export class ArenaGameEngine {
     }
 
     // Active Melee Slot (Key 3): Fire input swings the equipped melee weapon
-    if (f.activeSlot === 'melee') {
+    if (f.activeSlot === 'melee' && !f.isLastStand) {
+      f.minigunSpinTimer = Math.max(0, f.minigunSpinTimer - dt * 2.2);
       if (input.shoot && f.meleeCooldownTimer <= 0) {
         this.performMeleeStrike(f);
       }
@@ -2537,7 +3674,8 @@ export class ArenaGameEngine {
     const maxClip = this.getEffectiveClipSize(f, f.weaponId);
 
     if (f.isReloading) {
-      f.reloadTimerMs -= dt * 1000;
+      f.minigunSpinTimer = Math.max(0, f.minigunSpinTimer - dt * 1.8);
+      f.reloadTimerMs -= dt * 1000 * frenzyRate;
       if (f.reloadTimerMs <= 0) {
         f.isReloading = false;
         f.ammo = maxClip;
@@ -2545,7 +3683,11 @@ export class ArenaGameEngine {
       return;
     }
 
-    if ((input.reload && f.ammo < maxClip) || (input.shoot && f.ammo <= 0)) {
+    if (
+      this.rules.gameMode !== 'one_in_chamber' &&
+      ((input.reload && f.ammo < maxClip) || (input.shoot && f.ammo <= 0))
+    ) {
+      f.minigunSpinTimer = Math.max(0, f.minigunSpinTimer - dt * 1.8);
       f.isReloading = true;
       f.reloadTimerMs = this.getEffectiveReloadMs(f, f.weaponId);
       f.burstRemaining = 0;
@@ -2553,8 +3695,20 @@ export class ArenaGameEngine {
       return;
     }
 
+    if (this.rules.gameMode === 'one_in_chamber' && f.ammo <= 0 && input.shoot && f.meleeCooldownTimer <= 0) {
+      this.performMeleeStrike(f);
+      return;
+    }
+
+    if (w.spinUpMs && input.shoot && f.ammo > 0) {
+      f.minigunSpinTimer = Math.min(w.spinUpMs / 1000, f.minigunSpinTimer + dt * frenzyRate);
+    } else {
+      f.minigunSpinTimer = Math.max(0, f.minigunSpinTimer - dt * 1.8);
+    }
+    const canFireSpin = !w.spinUpMs || f.minigunSpinTimer >= w.spinUpMs / 1000;
+
     if (f.burstRemaining > 0) {
-      f.burstTimerMs -= dt * 1000;
+      f.burstTimerMs -= dt * 1000 * frenzyRate;
       if (f.burstTimerMs <= 0 && f.ammo > 0) {
         this.fireSingleWeaponRound(f);
         f.burstRemaining -= 1;
@@ -2563,7 +3717,7 @@ export class ArenaGameEngine {
       return;
     }
 
-    if (input.shoot && f.fireCooldownMs <= 0 && f.ammo > 0) {
+    if (input.shoot && f.fireCooldownMs <= 0 && f.ammo > 0 && canFireSpin) {
       this.fireSingleWeaponRound(f);
       f.fireCooldownMs = w.fireRateMs;
       if (w.burstCount && w.burstCount > 1 && f.ammo > 0) {
@@ -2578,7 +3732,7 @@ export class ArenaGameEngine {
     const spread = isSmgs ? 0.14 : 0.085;
     const dmg = isSmgs ? 11 : 17;
     const speed = isSmgs ? 1050 : 1140;
-    const dmgMult = f.characterId === 'iron_bear' && f.ultActiveTimer > 0 ? 2 : 1;
+    const dmgMult = f.characterId === 'agent_404' && f.ultActiveTimer > 0 ? 1.6 : 1;
 
     f.dualWieldAmmo = Math.max(0, f.dualWieldAmmo - 2);
     f.muzzleFlashTimer = 0.055;
@@ -2601,7 +3755,7 @@ export class ArenaGameEngine {
         prevY: sy,
         vx: Math.cos(ang) * speed,
         vy: Math.sin(ang) * speed,
-        damage: dmg * dmgMult,
+        damage: Math.round(dmg * dmgMult),
         explosionRadius: 0,
         color: isSmgs ? '#FB7185' : '#C084FC',
         life: 1.5,
@@ -2626,24 +3780,36 @@ export class ArenaGameEngine {
 
     f.ammo = Math.max(0, f.ammo - 1);
     f.muzzleFlashTimer = 0.06;
-    const recoilScale = f.characterId === 'iron_bear' ? 0.65 : 1.0;
+    const recoilScale = f.characterId === 'agent_404' ? 0.65 : 1.0;
     f.recoilKick = Math.min(11, (w.recoil / 28) * recoilScale);
 
-    const ironBearDmgMult = f.characterId === 'iron_bear' && f.ultActiveTimer > 0 ? 2 : 1;
-    const spreadMult = f.characterId === 'iron_bear' ? 0.65 : 1.0;
+    const glitchDmgMult = f.characterId === 'agent_404' && f.ultActiveTimer > 0 ? 1.6 : 1;
+    const spreadMult = f.characterId === 'agent_404' ? 0.65 : 1.0;
     const oneHitSniper = this.rules.oneHitSnipers && w.category === 'Sniper';
-    const roundDmg = oneHitSniper ? 240 : w.damage * ironBearDmgMult;
+    const oneHitChamber = this.rules.gameMode === 'one_in_chamber';
+    const roundDmg = oneHitChamber ? 240 : oneHitSniper ? 240 : Math.round(w.damage * glitchDmgMult);
+    const rocketBlast =
+      w.explosionRadius > 0 && f.characterId === 'prof_jugaad'
+        ? Math.round(w.explosionRadius * 1.2)
+        : w.explosionRadius;
+    const velBonus = f.characterId === 'aunty_cctv' ? 1.12 : 1.0;
 
     const muzzleX = f.x + Math.cos(f.aimAngle) * (w.length + 4);
     const muzzleY = f.y - 4 + Math.sin(f.aimAngle) * (w.length + 4);
 
-    if (f.weaponId !== 'bomberier') {
+    if (
+      f.weaponId !== 'bomberier' &&
+      f.weaponId !== 'plasma_repeater' &&
+      f.weaponId !== 'freeze_ray' &&
+      f.weaponId !== 'crossbow_launcher' &&
+      f.weaponId !== 'orbital_laser'
+    ) {
       this.spawnCasing(f.x, f.y - 6, f.facing);
     }
 
     for (let i = 0; i < w.pellets; i++) {
       const ang = f.aimAngle + (Math.random() - 0.5) * w.spreadRad * spreadMult;
-      const spd = w.projectileSpeed * (0.96 + Math.random() * 0.08);
+      const spd = w.projectileSpeed * (0.96 + Math.random() * 0.08) * velBonus;
       this.projectiles.push({
         id: this.nextProjectileId++,
         ownerId: f.id,
@@ -2655,10 +3821,34 @@ export class ArenaGameEngine {
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
         damage: roundDmg,
-        explosionRadius: w.explosionRadius,
+        explosionRadius: rocketBlast,
         color: w.bulletColor,
-        life: w.id === 'bomberier' ? 3.2 : 1.8,
+        life: w.id === 'bomberier' ? 3.2 : w.stickyExplosive ? 2.6 : w.noDrop ? 1.5 : 1.8,
         isRocket: w.id === 'bomberier',
+        noDrop: w.noDrop,
+        knockback: w.knockback,
+        stickyExplosive: w.stickyExplosive,
+        freezeDurationSec: w.freezeDurationSec,
+      });
+    }
+
+    if (f.isBoss) {
+      const bossAng = f.aimAngle + (Math.random() > 0.5 ? 0.14 : -0.14);
+      this.projectiles.push({
+        id: this.nextProjectileId++,
+        ownerId: f.id,
+        weaponId: f.weaponId,
+        x: muzzleX,
+        y: muzzleY,
+        prevX: f.x,
+        prevY: f.y - 4,
+        vx: Math.cos(bossAng) * 1140,
+        vy: Math.sin(bossAng) * 1140,
+        damage: 9,
+        explosionRadius: 0,
+        color: '#22D3EE',
+        life: 1.4,
+        isRocket: false,
       });
     }
 
@@ -2671,7 +3861,7 @@ export class ArenaGameEngine {
     f.vx -= Math.cos(f.aimAngle) * w.recoil * 0.16 * recoilScale;
     this.addCameraShake(f.playerIndex, Math.min(6, w.recoil / 50));
 
-    if (f.ammo <= 0) {
+    if (f.ammo <= 0 && !oneHitChamber) {
       f.isReloading = true;
       f.reloadTimerMs = this.getEffectiveReloadMs(f, f.weaponId);
       f.burstRemaining = 0;
@@ -2683,6 +3873,36 @@ export class ArenaGameEngine {
     const kept: ProjectileEntity[] = [];
 
     for (const proj of this.projectiles) {
+      if (proj.stuck) {
+        proj.prevX = proj.x;
+        proj.prevY = proj.y;
+        proj.stuckTimer = (proj.stuckTimer ?? 0.65) - dt;
+        if (proj.stuckFighterId) {
+          const tgt = this.fighters.find((ft) => ft.id === proj.stuckFighterId);
+          if (tgt && tgt.alive) {
+            proj.x = tgt.x + (proj.stuckOffsetX || 0);
+            proj.y = tgt.y + (proj.stuckOffsetY || 0);
+          } else {
+            proj.stuckTimer = 0;
+          }
+        }
+        if ((proj.stuckTimer ?? 0) <= 0) {
+          const kWeapon: KillFeedWeaponId = proj.fromUltimate ? 'ultimate' : proj.weaponId;
+          this.triggerExplosion(
+            proj.x,
+            proj.y,
+            proj.explosionRadius || 105,
+            proj.damage,
+            proj.ownerId,
+            kWeapon
+          );
+          this.hitstopTimer = 0.025;
+        } else {
+          kept.push(proj);
+        }
+        continue;
+      }
+
       proj.prevX = proj.x;
       proj.prevY = proj.y;
 
@@ -2701,6 +3921,10 @@ export class ArenaGameEngine {
         }
       }
 
+      if (!proj.noDrop && proj.stickyExplosive) {
+        proj.vy += 260 * dt;
+      }
+
       proj.x += proj.vx * dt;
       proj.y += proj.vy * dt;
       proj.life -= dt;
@@ -2710,17 +3934,94 @@ export class ArenaGameEngine {
       }
 
       let hit = false;
+      let firewallBlocked = false;
+      let stuckTargetFighter: FighterEntity | null = null;
+      const owner = this.fighters.find((ft) => ft.id === proj.ownerId);
 
-      if (proj.x < 36 || proj.x > this.map.width - 36 || proj.y < 32 || proj.y > this.map.height) {
-        hit = true;
+      // Baba Wi-Fi Firewall Shield blocks incoming projectiles in 38px radius
+      for (const f of this.fighters) {
+        if (!f.alive || f.id === proj.ownerId || this.isFriendly(owner, f)) continue;
+        if (f.characterId === 'baba_wifi' && f.ultActiveTimer > 0) {
+          if (Math.hypot(proj.x - f.x, proj.y - (f.y - 4)) <= 38) {
+            hit = true;
+            firewallBlocked = true;
+            this.spawnBurst(proj.x, proj.y, '#22D3EE', 6, 150);
+            if (Math.random() < 0.25) {
+              this.spawnFloatingText(f.x, f.y - 40, 'BLOCKED!', '#22D3EE');
+            }
+            break;
+          }
+        }
+      }
+
+      // Two-Way Portal bullet teleportation
+      const pRef = proj as ProjectileEntity & { warped?: boolean };
+      if (!pRef.warped) {
+        for (const prt of this.portals) {
+          if (Math.hypot(proj.x - prt.aX, proj.y - prt.aY) < prt.radius) {
+            pRef.warped = true;
+            proj.x = prt.bX;
+            proj.y = prt.bY;
+            proj.prevX = proj.x;
+            proj.prevY = proj.y;
+            soundEngine.playPortalWarp();
+            this.spawnBurst(proj.x, proj.y, '#FB923C', 6, 120);
+            break;
+          } else if (Math.hypot(proj.x - prt.bX, proj.y - prt.bY) < prt.radius) {
+            pRef.warped = true;
+            proj.x = prt.aX;
+            proj.y = prt.aY;
+            proj.prevX = proj.x;
+            proj.prevY = proj.y;
+            soundEngine.playPortalWarp();
+            this.spawnBurst(proj.x, proj.y, '#38BDF8', 6, 120);
+            break;
+          }
+        }
+      }
+
+      if (!hit && (proj.x < 36 || proj.x > this.map.width - 36 || proj.y < 32 || proj.y > this.map.height)) {
+        if (proj.isChappal && (proj.bouncesLeft || 0) > 0) {
+          proj.bouncesLeft = (proj.bouncesLeft || 1) - 1;
+          if (proj.x < 36 || proj.x > this.map.width - 36) proj.vx = -proj.vx;
+          if (proj.y < 32 || proj.y > this.map.height) proj.vy = -proj.vy;
+          proj.x = Math.max(38, Math.min(this.map.width - 38, proj.x));
+          proj.y = Math.max(34, Math.min(this.map.height - 10, proj.y));
+          this.spawnBurst(proj.x, proj.y, '#FACC15', 6, 140);
+        } else {
+          hit = true;
+        }
       }
 
       if (!hit) {
-        for (const p of this.map.platforms) {
+        for (const p of this.getActivePlatforms()) {
           if (p.kind === 'oneway') continue;
           if (this.pointInRect(proj.x, proj.y, p.x, p.y, p.w, p.h)) {
+            if (proj.isChappal && (proj.bouncesLeft || 0) > 0) {
+              proj.bouncesLeft = (proj.bouncesLeft || 1) - 1;
+              if (proj.prevX < p.x || proj.prevX > p.x + p.w) {
+                proj.vx = -proj.vx;
+              } else {
+                proj.vy = -proj.vy;
+              }
+              proj.x = proj.prevX;
+              proj.y = proj.prevY;
+              this.spawnBurst(proj.x, proj.y, '#FACC15', 6, 140);
+            } else {
+              hit = true;
+              this.spawnBurst(proj.x, proj.y, '#CBD5E1', 5, 130);
+            }
+            break;
+          }
+        }
+      }
+
+      if (!hit) {
+        for (const gf of this.glassFloors) {
+          if (!gf.alive) continue;
+          if (this.pointInRect(proj.x, proj.y, gf.x, gf.y, gf.w, gf.h)) {
             hit = true;
-            this.spawnBurst(proj.x, proj.y, '#CBD5E1', 5, 130);
+            this.damageGlassFloor(gf);
             break;
           }
         }
@@ -2729,9 +4030,16 @@ export class ArenaGameEngine {
       if (!hit) {
         for (const tw of this.tempWalls) {
           if (this.pointInRect(proj.x, proj.y, tw.x, tw.y, tw.w, tw.h)) {
-            hit = true;
-            tw.hp -= proj.damage;
-            this.spawnBurst(proj.x, proj.y, '#FACC15', 6, 150);
+            if (proj.isChappal && (proj.bouncesLeft || 0) > 0) {
+              proj.bouncesLeft = (proj.bouncesLeft || 1) - 1;
+              proj.vx = -proj.vx;
+              proj.x = proj.prevX;
+              this.spawnBurst(proj.x, proj.y, '#FACC15', 6, 140);
+            } else {
+              hit = true;
+              tw.hp -= proj.damage;
+              this.spawnBurst(proj.x, proj.y, '#FACC15', 6, 150);
+            }
             break;
           }
         }
@@ -2742,7 +4050,9 @@ export class ArenaGameEngine {
           if (!dw.alive) continue;
           if (this.pointInRect(proj.x, proj.y, dw.x, dw.y, dw.w, dw.h)) {
             hit = true;
-            this.damageDestructibleWall(dw, proj.damage, proj.ownerId);
+            if (!proj.stickyExplosive) {
+              this.damageDestructibleWall(dw, proj.damage, proj.ownerId);
+            }
             this.spawnBurst(proj.x, proj.y, dw.style === 'glass' ? '#7DD3FC' : '#F59E0B', 6, 150);
             break;
           }
@@ -2754,14 +4064,15 @@ export class ArenaGameEngine {
           if (!b.alive) continue;
           if (this.pointInRect(proj.x, proj.y, b.x - b.w / 2, b.y - b.h, b.w, b.h)) {
             hit = true;
-            this.damageBarrel(b, proj.damage, proj.ownerId);
+            if (!proj.stickyExplosive) {
+              this.damageBarrel(b, proj.damage, proj.ownerId, proj.vx, proj.vy);
+            }
             break;
           }
         }
       }
 
       if (!hit) {
-        const owner = this.fighters.find((ft) => ft.id === proj.ownerId);
         for (const f of this.fighters) {
           if (!f.alive || f.id === proj.ownerId || this.isFriendly(owner, f)) continue;
           if (
@@ -2775,16 +4086,36 @@ export class ArenaGameEngine {
             )
           ) {
             hit = true;
-            if (!proj.isRocket) {
-              const isHeadshot = proj.y <= f.y - 6;
+            if (proj.stickyExplosive) {
+              stuckTargetFighter = f;
+            } else if (!proj.isRocket) {
+              const isHeadshot = !proj.isChappal && proj.y <= f.y - 6;
               const finalDmg = isHeadshot ? Math.round(proj.damage * 1.5) : proj.damage;
               const kWeapon: KillFeedWeaponId =
                 proj.killFeedWeaponOverride || (proj.fromUltimate ? 'ultimate' : proj.weaponId);
 
-              this.applyDamage(f, finalDmg, proj.ownerId, kWeapon, isHeadshot);
-              this.spawnBurst(proj.x, proj.y, isHeadshot ? '#FACC15' : '#EF4444', isHeadshot ? 10 : 6, 160);
+              if (proj.isChappal) {
+                f.stunTimer = Math.max(f.stunTimer, 1.4);
+                this.spawnFloatingText(f.x, f.y - 42, 'CHAPPALED!', '#FACC15');
+                this.spawnBurst(proj.x, proj.y, '#FACC15', 14, 210);
+              } else {
+                this.spawnBurst(proj.x, proj.y, isHeadshot ? '#FACC15' : '#EF4444', isHeadshot ? 10 : 6, 160);
+              }
 
-              if (WEAPONS[proj.weaponId].category === 'Sniper') {
+              if (proj.knockback) {
+                const hitAng = Math.atan2(proj.vy, proj.vx);
+                f.vx += Math.cos(hitAng) * proj.knockback;
+                f.vy = Math.min(f.vy - 90, -140);
+              }
+
+              if (proj.freezeDurationSec) {
+                f.freezeTimer = Math.max(f.freezeTimer, proj.freezeDurationSec);
+                this.spawnBurst(proj.x, proj.y, '#7DD3FC', 7, 130);
+              }
+
+              this.applyDamage(f, finalDmg, proj.ownerId, kWeapon, isHeadshot);
+
+              if (WEAPONS[proj.weaponId].category === 'Sniper' && !proj.isChappal) {
                 this.hitstopTimer = 0.025;
               }
             }
@@ -2793,7 +4124,23 @@ export class ArenaGameEngine {
         }
       }
 
-      if (hit && proj.isRocket) {
+      if (hit && proj.stickyExplosive && !firewallBlocked) {
+        proj.stuck = true;
+        proj.stuckTimer = 0.65;
+        proj.vx = 0;
+        proj.vy = 0;
+        if (stuckTargetFighter) {
+          proj.stuckFighterId = stuckTargetFighter.id;
+          proj.stuckOffsetX = proj.x - stuckTargetFighter.x;
+          proj.stuckOffsetY = proj.y - stuckTargetFighter.y;
+        }
+        soundEngine.playPlasmaStick();
+        this.spawnBurst(proj.x, proj.y, '#FB7185', 6, 120);
+        kept.push(proj);
+        continue;
+      }
+
+      if (hit && proj.isRocket && !firewallBlocked) {
         const kWeapon: KillFeedWeaponId = proj.fromUltimate ? 'ultimate' : proj.weaponId;
         this.triggerExplosion(
           proj.x,
@@ -2814,11 +4161,29 @@ export class ArenaGameEngine {
     this.projectiles = kept;
   }
 
-  private damageBarrel(b: BarrelEntity, dmg: number, attackerId: string): void {
-    b.hp -= dmg;
+  private damageBarrel(
+    b: BarrelEntity,
+    dmg: number,
+    attackerId: string,
+    shotVx?: number,
+    shotVy?: number
+  ): void {
     b.hitFlashTimer = 0.1;
+    if (!b.launched && shotVx !== undefined && shotVy !== undefined && b.hp > 0) {
+      const spd = Math.max(1, Math.hypot(shotVx, shotVy));
+      b.launched = true;
+      b.launcherId = attackerId;
+      b.fuseTimer = 1.4;
+      b.vx = (shotVx / spd) * 460;
+      b.vy = Math.min(-140, (shotVy / spd) * 420 - 120);
+      this.spawnFloatingText(b.x, b.y - 42, 'ROCKET BARREL!', '#F97316');
+      return;
+    }
+
+    b.hp -= dmg;
     if (b.hp <= 0) {
       b.alive = false;
+      b.launched = false;
       b.respawnTimer = 15;
       this.spawnRandomSupplyDrop(b.x, b.y - 18);
       this.triggerExplosion(b.x, b.y - b.h / 2, 138, 86, attackerId, 'barrel');
@@ -2878,7 +4243,25 @@ export class ArenaGameEngine {
   }
 
   private spawnRandomSupplyDrop(x: number, y: number): void {
-    if (Math.random() < 0.28) {
+    const roll = Math.random();
+    if (roll < 0.32 && this.weaponDrops.length < 4) {
+      const chosen =
+        PRIMARY_PICKUP_WEAPONS[Math.floor(Math.random() * PRIMARY_PICKUP_WEAPONS.length)];
+      this.weaponDrops.push({
+        id: this.nextWeaponDropId++,
+        x,
+        y: y - 10,
+        vx: (Math.random() - 0.5) * 140,
+        vy: -230,
+        weaponId: chosen,
+        life: 24,
+        maxLife: 24,
+        bobPhase: Math.random() * Math.PI * 2,
+      });
+      return;
+    }
+
+    if (roll < 0.56) {
       const dwTypes: DualWieldType[] = ['dual_pistols', 'dual_smgs'];
       const chosen = dwTypes[Math.floor(Math.random() * dwTypes.length)];
       this.dualWieldDrops.push({
@@ -2887,6 +4270,23 @@ export class ArenaGameEngine {
         y: y - 10,
         vx: (Math.random() - 0.5) * 140,
         vy: -220,
+        type: chosen,
+        life: 20,
+        maxLife: 20,
+        bobPhase: Math.random() * Math.PI * 2,
+      });
+      return;
+    }
+
+    if (Math.random() < 0.4) {
+      const mTypes: MysteryPowerUpType[] = ['shrink', 'mega_size', 'bubble_shield', 'holo_decoy'];
+      const chosen = mTypes[Math.floor(Math.random() * mTypes.length)];
+      this.powerUps.push({
+        id: this.nextPowerUpId++,
+        x,
+        y: y - 10,
+        vx: (Math.random() - 0.5) * 140,
+        vy: -230,
         type: chosen,
         life: 20,
         maxLife: 20,
@@ -2908,6 +4308,30 @@ export class ArenaGameEngine {
       maxLife: 18,
       bobPhase: Math.random() * Math.PI * 2,
     });
+  }
+
+  private spawnMidMapWeaponDrop(): void {
+    const centerZone =
+      this.map.hardpoints[Math.floor(Math.random() * this.map.hardpoints.length)] ||
+      this.map.podiumZone;
+    const x = centerZone
+      ? centerZone.x + centerZone.w / 2 + (Math.random() - 0.5) * 120
+      : this.map.width / 2;
+    const y = centerZone ? centerZone.y + centerZone.h - 42 : 240;
+    const chosen =
+      PRIMARY_PICKUP_WEAPONS[Math.floor(Math.random() * PRIMARY_PICKUP_WEAPONS.length)];
+    this.weaponDrops.push({
+      id: this.nextWeaponDropId++,
+      x,
+      y,
+      vx: 0,
+      vy: -140,
+      weaponId: chosen,
+      life: 24,
+      maxLife: 24,
+      bobPhase: Math.random() * Math.PI * 2,
+    });
+    this.spawnFloatingText(x, y - 28, `${WEAPONS[chosen].shortName.toUpperCase()} DROP!`, '#22D3EE');
   }
 
   private triggerExplosion(
@@ -2937,11 +4361,25 @@ export class ArenaGameEngine {
       const d = Math.hypot(f.x - x, f.y - y);
       if (d <= radius) {
         const falloff = 1 - (d / radius) * 0.65;
-        const dmg = Math.round(maxDamage * falloff);
+        const isSelfRocketSurf = f.id === attackerId;
+        const dmg = Math.round(maxDamage * falloff * (isSelfRocketSurf ? 0.35 : 1.0));
         const knockAng = Math.atan2(f.y - y, f.x - x);
-        f.vx += Math.cos(knockAng) * 320 * falloff;
-        f.vy += Math.sin(knockAng) * 280 * falloff - 110;
+        const surfScale = isSelfRocketSurf ? 1.55 : 1.0;
+        f.vx += Math.cos(knockAng) * 340 * falloff * surfScale;
+        f.vy += (Math.sin(knockAng) * 300 - 135) * falloff * surfScale;
+        if (isSelfRocketSurf && d < 90) {
+          this.spawnFloatingText(f.x, f.y - 36, 'ROCKET SURF!', '#FB923C');
+        }
         this.applyDamage(f, dmg, attackerId, weaponId, false);
+      }
+    }
+
+    for (const gf of this.glassFloors) {
+      if (!gf.alive) continue;
+      const cx = Math.max(gf.x, Math.min(x, gf.x + gf.w));
+      const cy = Math.max(gf.y, Math.min(y, gf.y + gf.h));
+      if (Math.hypot(x - cx, y - cy) <= radius) {
+        this.damageGlassFloor(gf, true);
       }
     }
 
@@ -2971,18 +4409,27 @@ export class ArenaGameEngine {
     weaponId: KillFeedWeaponId,
     isHeadshot: boolean
   ): void {
-    if (!victim.alive || victim.spawnInvulnTimer > 0) return;
+    if (!victim.alive || victim.spawnInvulnTimer > 0 || victim.dashTimer > 0) return;
 
     const attacker = this.fighters.find((f) => f.id === attackerId);
     if (attacker && attacker.id !== victim.id && this.isFriendly(attacker, victim)) {
       return;
     }
     const botDmgMult = attacker && !attacker.isHuman && victim.isHuman ? 0.62 : 1.0;
-    const armorMult =
-      victim.characterId === 'yogi_boy' && victim.ultActiveTimer > 0 ? 0.4 : 1.0;
-    let dmg = Math.max(1, Math.round(rawDmg * armorMult * botDmgMult));
+    let dmg = Math.max(1, Math.round(rawDmg * botDmgMult));
 
-    if (victim.shieldHp > 0 && victim.shieldBuffTimer > 0) {
+    if (victim.bubbleShieldHp > 0 && victim.bubbleShieldTimer > 0) {
+      const absorbed = Math.min(victim.bubbleShieldHp, dmg);
+      victim.bubbleShieldHp -= absorbed;
+      dmg -= absorbed;
+      this.spawnBurst(victim.x, victim.y, '#A855F7', 4, 110);
+      if (victim.bubbleShieldHp <= 0) {
+        victim.bubbleShieldTimer = 0;
+        this.spawnFloatingText(victim.x, victim.y - 40, 'BUBBLE POPPED!', '#C084FC');
+      }
+    }
+
+    if (victim.shieldHp > 0 && victim.shieldBuffTimer > 0 && dmg > 0) {
       const absorbed = Math.min(victim.shieldHp, dmg);
       victim.shieldHp -= absorbed;
       dmg -= absorbed;
@@ -3000,14 +4447,19 @@ export class ArenaGameEngine {
     if (isHeadshot) {
       soundEngine.playHeadshotDing();
       this.spawnFloatingText(victim.x, victim.y - 34, `HEADSHOT -${dmg}`, '#FACC15');
-    } else {
+    } else if (dmg > 0) {
       this.spawnFloatingText(victim.x, victim.y - 28, `-${dmg}`, '#F87171');
     }
 
     if (attacker && attacker.id !== victim.id) {
       attacker.damageDealt += dmg;
       if (isHeadshot) attacker.headshotsCount += 1;
-      const ultGainMult = attacker.characterId === 'red_dragon' ? 1.25 : 1.0;
+      const ultGainMult =
+        attacker.characterId === 'general_noodle'
+          ? 1.25
+          : attacker.characterId === 'aunty_cctv' || attacker.characterId === 'baron_voltage'
+          ? 1.15
+          : 1.0;
       attacker.ultCharge = Math.min(100, attacker.ultCharge + dmg * 0.65 * ultGainMult);
       if (attacker.isHuman && !isHeadshot) {
         soundEngine.playHit();
@@ -3018,7 +4470,24 @@ export class ArenaGameEngine {
     }
 
     if (victim.hp <= 0) {
-      this.handleFighterDeath(victim, attackerId, weaponId, isHeadshot);
+      if (
+        !victim.isLastStand &&
+        !victim.isBoss &&
+        this.rules.gameMode !== 'one_in_chamber'
+      ) {
+        victim.isLastStand = true;
+        victim.lastStandTimer = 3.0;
+        victim.hp = 25;
+        victim.grappleActive = false;
+        victim.activeSlot = 'secondary';
+        victim.weaponId = 'pistol';
+        victim.ammo = 6;
+        victim.isReloading = false;
+        soundEngine.playLastStand();
+        this.spawnFloatingText(victim.x, victim.y - 44, 'LAST STAND! (3s)', '#EF4444');
+      } else {
+        this.handleFighterDeath(victim, attackerId, weaponId, isHeadshot);
+      }
     }
   }
 
@@ -3029,6 +4498,9 @@ export class ArenaGameEngine {
     isHeadshot: boolean
   ): void {
     victim.alive = false;
+    victim.isLastStand = false;
+    victim.lastStandTimer = 0;
+    victim.grappleActive = false;
     victim.deaths += 1;
     victim.respawnTimer = 2.6;
     victim.dualWield = null;
@@ -3052,6 +4524,7 @@ export class ArenaGameEngine {
 
     const killer = this.fighters.find((f) => f.id === killerId);
     let multiKillCount = 0;
+    let feedWeapon = weaponId;
 
     if (killer && killer.id !== victim.id) {
       killer.kills += 1;
@@ -3059,12 +4532,89 @@ export class ArenaGameEngine {
       this.lastKillerId = killer.id;
       this.lastVictimId = victim.id;
 
+      if (killer.isLastStand) {
+        killer.afterlifeKillsCount += 1;
+        feedWeapon = 'last_stand';
+        this.spawnFloatingText(killer.x, killer.y - 52, 'AFTERLIFE KILL!', '#F43F5E');
+      }
+
+      // Nemesis Bounty System: 3 deaths in a row by same killer marks Nemesis; revenge awards +500 coins!
+      victim.consecutiveDeathsFrom[killer.id] =
+        (victim.consecutiveDeathsFrom[killer.id] || 0) + 1;
+      if (
+        victim.consecutiveDeathsFrom[killer.id] >= 3 &&
+        !victim.nemesisKillerIds.includes(killer.id)
+      ) {
+        victim.nemesisKillerIds.push(killer.id);
+        this.spawnFloatingText(victim.x, victim.y - 56, `NEMESIS: ${killer.name}`, '#F43F5E');
+      }
+      victim.consecutiveDeathsFrom[killer.id] = victim.consecutiveDeathsFrom[killer.id];
+      if (killer.nemesisKillerIds.includes(victim.id)) {
+        killer.nemesisKillerIds = killer.nemesisKillerIds.filter((id) => id !== victim.id);
+        killer.consecutiveDeathsFrom[victim.id] = 0;
+        killer.nemesisKillsCount += 1;
+        killer.nemesisRevengeCoinsEarned += 500;
+        soundEngine.playNemesisBounty();
+        this.spawnFloatingText(killer.x, killer.y - 62, 'NEMESIS BOUNTY +500!', '#FACC15');
+        this.pendingNetEvents.push({
+          kind: 'nemesis_bounty',
+          x: killer.x,
+          y: killer.y,
+          text: killer.name,
+        });
+      }
+
       if (this.rules.gameMode === 'tdm') {
         const kTeam = killer.team || 'alpha';
         if (kTeam === 'alpha') {
           this.teamScores.alpha = Math.min(40, this.teamScores.alpha + 1);
         } else {
           this.teamScores.bravo = Math.min(40, this.teamScores.bravo + 1);
+        }
+      } else if (this.rules.gameMode === 'vip') {
+        const pts = victim.isVip ? 2 : 1;
+        const kTeam = killer.team || 'alpha';
+        if (kTeam === 'alpha') {
+          this.teamScores.alpha = Math.min(25, this.teamScores.alpha + pts);
+        } else {
+          this.teamScores.bravo = Math.min(25, this.teamScores.bravo + pts);
+        }
+        if (victim.isVip) {
+          victim.isVip = false;
+          this.spawnFloatingText(victim.x, victim.y - 54, 'VIP ELIMINATED (+2)!', '#FACC15');
+          const nextTeammate =
+            this.fighters.find(
+              (f) => f.id !== victim.id && (f.team || 'alpha') === (victim.team || 'alpha') && f.alive
+            ) ||
+            this.fighters.find(
+              (f) => f.id !== victim.id && (f.team || 'alpha') === (victim.team || 'alpha')
+            );
+          if (nextTeammate) {
+            nextTeammate.isVip = true;
+            nextTeammate.maxHp = 300;
+            nextTeammate.hp = Math.min(300, nextTeammate.hp + 150);
+          } else {
+            victim.isVip = true;
+          }
+        }
+      } else if (this.rules.gameMode === 'one_in_chamber') {
+        killer.ammo += 1;
+        killer.secondaryAmmo = killer.ammo;
+        this.spawnFloatingText(killer.x, killer.y - 46, '+1 BULLET', '#FACC15');
+      } else if (this.rules.gameMode === 'gun_game') {
+        killer.gunGameTier += 1;
+        if (killer.gunGameTier < GUN_GAME_LADDER.length) {
+          const nextW = GUN_GAME_LADDER[killer.gunGameTier];
+          killer.primaryWeaponId = nextW;
+          killer.weaponId = nextW;
+          killer.activeSlot = 'primary';
+          killer.primaryAmmo = this.getEffectiveClipSize(killer, nextW);
+          killer.ammo = killer.primaryAmmo;
+          killer.isReloading = false;
+          this.spawnFloatingText(killer.x, killer.y - 50, `TIER ${killer.gunGameTier + 1}: ${WEAPONS[nextW].shortName}`, '#38BDF8');
+        } else if (killer.gunGameTier === GUN_GAME_LADDER.length) {
+          killer.activeSlot = 'melee';
+          this.spawnFloatingText(killer.x, killer.y - 50, 'FINAL TIER: MELEE KILL!', '#FACC15');
         }
       }
 
@@ -3194,7 +4744,7 @@ export class ArenaGameEngine {
       killerPlayerIndex: killer?.playerIndex,
       victimName: victim.name,
       victimPlayerIndex: victim.playerIndex,
-      weaponId,
+      weaponId: feedWeapon,
       isHeadshot,
       multiKillCount: multiKillCount >= 2 ? multiKillCount : undefined,
       timestamp: this.elapsedSec,
@@ -3207,6 +4757,18 @@ export class ArenaGameEngine {
       this.rules.gameMode === 'tdm' &&
       (this.teamScores.alpha >= 40 || this.teamScores.bravo >= 40)
     ) {
+      this.finishMatch();
+    } else if (
+      this.rules.gameMode === 'vip' &&
+      (this.teamScores.alpha >= 25 || this.teamScores.bravo >= 25)
+    ) {
+      this.finishMatch();
+    } else if (this.rules.gameMode === 'boss_raid' && victim.isBoss) {
+      this.teamScores.alpha = 1;
+      this.finishMatch();
+    } else if (this.rules.gameMode === 'gun_game' && killer && killer.gunGameTier > GUN_GAME_LADDER.length) {
+      this.finishMatch();
+    } else if (this.rules.gameMode === 'one_in_chamber' && killer && killer.kills >= 15) {
       this.finishMatch();
     } else if (this.rules.gameMode === 'ffa' && killer && killer.kills >= 20) {
       this.finishMatch();
@@ -3234,21 +4796,60 @@ export class ArenaGameEngine {
     f.vy = 0;
     f.hp = f.maxHp;
     f.fuel = f.maxFuel;
-    f.activeSlot = 'primary';
-    f.weaponId = f.primaryWeaponId;
-    f.primaryAmmo = this.getEffectiveClipSize(f, f.primaryWeaponId);
-    f.secondaryAmmo = this.getEffectiveClipSize(f, f.secondaryWeaponId);
-    f.ammo = f.primaryAmmo;
+    if (this.rules.gameMode === 'one_in_chamber') {
+      f.activeSlot = 'secondary';
+      f.secondaryWeaponId = 'pistol';
+      f.weaponId = 'pistol';
+      f.secondaryAmmo = 1;
+      f.ammo = 1;
+      f.grenades = 0;
+    } else if (this.rules.gameMode === 'gun_game') {
+      if (f.gunGameTier >= GUN_GAME_LADDER.length) {
+        f.activeSlot = 'melee';
+      } else {
+        const tierW = GUN_GAME_LADDER[f.gunGameTier];
+        f.activeSlot = 'primary';
+        f.primaryWeaponId = tierW;
+        f.weaponId = tierW;
+        f.primaryAmmo = this.getEffectiveClipSize(f, tierW);
+        f.ammo = f.primaryAmmo;
+      }
+      f.grenades = Math.max(f.grenades, 2);
+    } else {
+      f.activeSlot = 'primary';
+      f.weaponId = f.primaryWeaponId;
+      f.primaryAmmo = this.getEffectiveClipSize(f, f.primaryWeaponId);
+      f.secondaryAmmo = this.getEffectiveClipSize(f, f.secondaryWeaponId);
+      f.ammo = f.primaryAmmo;
+      f.grenades = Math.max(f.grenades, 2);
+    }
     f.weaponMastery = this.getMasteryForWeapon(f.masteryMap, f.weaponId);
     f.isReloading = false;
+    f.minigunSpinTimer = 0;
     f.alive = true;
     f.carryingFlagTeam = null;
     f.spawnInvulnTimer = 1.6;
-    f.grenades = Math.max(f.grenades, 2);
     f.speedBuffTimer = 0;
     f.fuelBuffTimer = 0;
     f.shieldHp = 0;
     f.shieldBuffTimer = 0;
+    f.stunTimer = 0;
+    f.danceTimer = 0;
+    f.freezeTimer = 0;
+    f.empDisableTimer = 0;
+    f.empDotTimer = 0;
+    f.empTickAccum = 0;
+    f.empOwnerId = null;
+    f.slamPending = false;
+    f.gossipCooldown = 0;
+    f.grappleActive = false;
+    f.dashTimer = 0;
+    f.shrinkTimer = 0;
+    f.megaSizeTimer = 0;
+    f.bubbleShieldHp = 0;
+    f.bubbleShieldTimer = 0;
+    f.isLastStand = false;
+    f.lastStandTimer = 0;
     this.triggerSpeechQuip(f, 'spawn');
     this.spawnBurst(f.x, f.y, '#38BDF8', 10, 120);
   }
@@ -3274,13 +4875,76 @@ export class ArenaGameEngine {
   }
 
   private updateBarrels(dt: number): void {
+    const activePlatforms = this.getActivePlatforms();
     for (const b of this.barrels) {
       if (b.hitFlashTimer > 0) b.hitFlashTimer = Math.max(0, b.hitFlashTimer - dt);
       if (!b.alive) {
         b.respawnTimer -= dt;
         if (b.respawnTimer <= 0) {
           b.alive = true;
+          b.launched = false;
+          b.launcherId = null;
+          b.fuseTimer = 0;
+          b.x = b.origX;
+          b.y = b.origY;
+          b.vx = 0;
+          b.vy = 0;
           b.hp = b.maxHp;
+        }
+        continue;
+      }
+
+      if (b.launched) {
+        b.fuseTimer -= dt;
+        b.vy = Math.min(540, b.vy + GRAVITY * 0.55 * dt);
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+
+        // Flame exhaust trail
+        if (Math.random() < 0.85) {
+          this.spawnBurst(b.x, b.y - b.h / 2, '#F97316', 2, 70, 'flame');
+          this.spawnBurst(b.x, b.y - b.h / 2, '#94A3B8', 1, 50, 'smoke');
+        }
+
+        // Launch barrels upward on Jump Pads & Wind Vents
+        for (const jp of this.jumpPads) {
+          if (b.x > jp.x && b.x < jp.x + jp.w && Math.abs(b.y - jp.y) < 20) {
+            b.vy = -720;
+            jp.compress = 1;
+            soundEngine.playJumpPad();
+          }
+        }
+        for (const wv of this.windVents) {
+          if (b.x > wv.x && b.x < wv.x + wv.w && b.y <= wv.y && b.y >= wv.y - wv.height) {
+            b.vy = Math.max(-420, b.vy - 1600 * dt);
+          }
+        }
+
+        let detonate = b.fuseTimer <= 0 || b.x < 45 || b.x > this.map.width - 45 || b.y > this.map.height - 45;
+        if (!detonate) {
+          for (const p of activePlatforms) {
+            if (p.kind !== 'oneway' && this.rectOverlap(b.x - b.w / 2, b.y - b.h, b.w, b.h, p.x, p.y, p.w, p.h)) {
+              detonate = true;
+              break;
+            }
+          }
+        }
+        if (!detonate) {
+          for (const f of this.fighters) {
+            if (!f.alive) continue;
+            if (Math.hypot(f.x - b.x, f.y - (b.y - b.h / 2)) < 36) {
+              detonate = true;
+              break;
+            }
+          }
+        }
+
+        if (detonate) {
+          b.alive = false;
+          b.launched = false;
+          b.respawnTimer = 15;
+          this.spawnRandomSupplyDrop(b.x, b.y - 18);
+          this.triggerExplosion(b.x, b.y - b.h / 2, 148, 96, b.launcherId || 'arena', 'barrel');
         }
       }
     }
@@ -3328,7 +4992,7 @@ export class ArenaGameEngine {
       pu.y += pu.vy * dt;
       pu.vx *= Math.pow(0.25, dt);
 
-      for (const p of this.map.platforms) {
+      for (const p of this.getActivePlatforms()) {
         if (pu.vy >= 0 && pu.x >= p.x && pu.x <= p.x + p.w && pu.y + 12 >= p.y && pu.y + 12 <= p.y + 24) {
           pu.y = p.y - 12;
           pu.vy = 0;
@@ -3340,18 +5004,53 @@ export class ArenaGameEngine {
         if (!f.alive) continue;
         if (Math.hypot(f.x - pu.x, f.y - pu.y) < 34) {
           picked = true;
-          soundEngine.playPickup();
           if (pu.type === 'speed') {
+            soundEngine.playPickup();
             f.speedBuffTimer = 9;
             this.spawnFloatingText(f.x, f.y - 38, 'SPEED BOOST!', '#FACC15');
           } else if (pu.type === 'fuel_efficiency') {
+            soundEngine.playPickup();
             f.fuelBuffTimer = 10;
             f.fuel = f.maxFuel;
             this.spawnFloatingText(f.x, f.y - 38, 'ECO JETPACK!', '#2DD4BF');
-          } else {
+          } else if (pu.type === 'shield') {
+            soundEngine.playPickup();
             f.shieldHp = 60;
             f.shieldBuffTimer = 11;
             this.spawnFloatingText(f.x, f.y - 38, '+60 SHIELD!', '#38BDF8');
+          } else if (pu.type === 'shrink') {
+            soundEngine.playPowerUpMystery();
+            f.shrinkTimer = 12;
+            f.megaSizeTimer = 0;
+            this.spawnFloatingText(f.x, f.y - 38, 'TINY AGENT!', '#EC4899');
+          } else if (pu.type === 'mega_size') {
+            soundEngine.playPowerUpMystery();
+            f.megaSizeTimer = 12;
+            f.shrinkTimer = 0;
+            f.shieldHp = 200;
+            f.shieldBuffTimer = 12;
+            this.spawnFloatingText(f.x, f.y - 42, 'MEGA GIANT +200 ARMOR!', '#F59E0B');
+          } else if (pu.type === 'bubble_shield') {
+            soundEngine.playPowerUpMystery();
+            f.bubbleShieldHp = 120;
+            f.bubbleShieldTimer = 10;
+            this.spawnFloatingText(f.x, f.y - 40, 'BUBBLE SHIELD!', '#A855F7');
+          } else if (pu.type === 'holo_decoy') {
+            soundEngine.playPowerUpMystery();
+            this.holograms.push({
+              id: this.nextHologramId++,
+              ownerId: f.id,
+              x: f.x,
+              y: f.y,
+              vx: f.facing * 240,
+              vy: -60,
+              facing: f.facing,
+              characterId: f.characterId,
+              outfitId: f.outfitId,
+              life: 8.5,
+              fireTimer: 0.4,
+            });
+            this.spawnFloatingText(f.x, f.y - 40, 'HOLOGRAM DECOY!', '#22D3EE');
           }
           break;
         }
@@ -3372,7 +5071,7 @@ export class ArenaGameEngine {
       dw.y += dw.vy * dt;
       dw.vx *= Math.pow(0.25, dt);
 
-      for (const p of this.map.platforms) {
+      for (const p of this.getActivePlatforms()) {
         if (dw.vy >= 0 && dw.x >= p.x && dw.x <= p.x + p.w && dw.y + 12 >= p.y && dw.y + 12 <= p.y + 24) {
           dw.y = p.y - 12;
           dw.vy = 0;
@@ -3402,6 +5101,53 @@ export class ArenaGameEngine {
     this.dualWieldDrops = kept;
   }
 
+  private updateWeaponDrops(dt: number): void {
+    const kept: WeaponDropEntity[] = [];
+    for (const wd of this.weaponDrops) {
+      wd.life -= dt;
+      wd.bobPhase += dt * 4;
+      wd.vy = Math.min(480, wd.vy + GRAVITY * dt * 0.8);
+      wd.x += wd.vx * dt;
+      wd.y += wd.vy * dt;
+      wd.vx *= Math.pow(0.25, dt);
+
+      for (const p of this.getActivePlatforms()) {
+        if (wd.vy >= 0 && wd.x >= p.x && wd.x <= p.x + p.w && wd.y + 12 >= p.y && wd.y + 12 <= p.y + 24) {
+          wd.y = p.y - 12;
+          wd.vy = 0;
+        }
+      }
+
+      let picked = false;
+      const allowPickup =
+        this.rules.gameMode !== 'gun_game' && this.rules.gameMode !== 'one_in_chamber';
+      for (const f of this.fighters) {
+        if (!f.alive || !allowPickup) continue;
+        if (Math.hypot(f.x - wd.x, f.y - wd.y) < 36) {
+          picked = true;
+          f.primaryWeaponId = wd.weaponId;
+          f.activeSlot = 'primary';
+          f.weaponId = wd.weaponId;
+          f.primaryAmmo = this.getEffectiveClipSize(f, wd.weaponId);
+          f.ammo = f.primaryAmmo;
+          f.isReloading = false;
+          f.reloadTimerMs = 0;
+          f.burstRemaining = 0;
+          f.minigunSpinTimer = 0;
+          f.dualWield = null;
+          f.dualWieldAmmo = 0;
+          f.weaponMastery = this.getMasteryForWeapon(f.masteryMap, wd.weaponId);
+          soundEngine.playPickup();
+          this.spawnFloatingText(f.x, f.y - 44, WEAPONS[wd.weaponId].name.toUpperCase(), '#22D3EE');
+          break;
+        }
+      }
+
+      if (!picked && wd.life > 0) kept.push(wd);
+    }
+    this.weaponDrops = kept;
+  }
+
   private updateParticles(dt: number): void {
     for (const pt of this.particles) {
       if (!pt.active) continue;
@@ -3416,7 +5162,7 @@ export class ArenaGameEngine {
 
       // Bouncing brass shell casings!
       if (pt.kind === 'casing' && pt.vy > 0) {
-        for (const p of this.map.platforms) {
+        for (const p of this.getActivePlatforms()) {
           if (nextX >= p.x && nextX <= p.x + p.w && pt.y <= p.y + 4 && nextY >= p.y) {
             pt.y = p.y - 1;
             pt.vy = -pt.vy * 0.45;
@@ -3488,13 +5234,343 @@ export class ArenaGameEngine {
     return best;
   }
 
+  private raycastGrappleAnchor(f: FighterEntity): { x: number; y: number } | null {
+    const maxRange = 480;
+    const step = 14;
+    const dx = Math.cos(f.aimAngle);
+    const dy = Math.sin(f.aimAngle);
+    const activePlatforms = this.getActivePlatforms();
+    for (let dist = 28; dist <= maxRange; dist += step) {
+      const rx = f.x + dx * dist;
+      const ry = f.y - 6 + dy * dist;
+      for (const p of activePlatforms) {
+        if (this.pointInRect(rx, ry, p.x, p.y, p.w, p.h)) {
+          return { x: rx, y: ry };
+        }
+      }
+      for (const dw of this.destructibleWalls) {
+        if (!dw.alive) continue;
+        if (this.pointInRect(rx, ry, dw.x, dw.y, dw.w, dw.h)) {
+          return { x: rx, y: ry };
+        }
+      }
+    }
+    return null;
+  }
+
+  private updateSubwayTrain(dt: number): void {
+    const tr = this.subwayTrain;
+    const track = this.map.subwayTrack;
+    if (!tr || !track) return;
+
+    if (!tr.active) {
+      if (tr.warningTimerSec > 0) {
+        tr.warningTimerSec = Math.max(0, tr.warningTimerSec - dt);
+        if (tr.warningTimerSec <= 0) {
+          tr.active = true;
+          tr.dir = tr.dir === 1 ? -1 : 1;
+          tr.x = tr.dir === 1 ? track.minX - tr.w - 40 : track.maxX + 40;
+          tr.vx = tr.dir * 1350;
+          tr.hitIds.clear();
+          this.spawnFloatingText(this.map.width / 2, track.y - 76, 'SUBWAY EXPRESS!', '#F59E0B');
+        }
+      } else {
+        tr.nextCycleTimerSec -= dt;
+        if (tr.nextCycleTimerSec <= 0) {
+          tr.nextCycleTimerSec = 45;
+          tr.warningTimerSec = 3.2;
+          soundEngine.playTrainSiren();
+          this.pendingNetEvents.push({ kind: 'train_siren' });
+        }
+      }
+      return;
+    }
+
+    tr.x += tr.vx * dt;
+    if ((tr.dir === 1 && tr.x > track.maxX + 140) || (tr.dir === -1 && tr.x + tr.w < track.minX - 140)) {
+      tr.active = false;
+    }
+  }
+
+  private updateEarthquakeCollapse(dt: number): void {
+    if (this.timeRemainingSec > 30) return;
+
+    if (!this.earthquakeActive) {
+      this.earthquakeActive = true;
+      this.earthquakeTimer = 0.9;
+      for (const cam of this.cameras) {
+        cam.shake = Math.max(cam.shake, 13);
+      }
+      soundEngine.playEarthquake();
+      this.spawnFloatingText(
+        this.map.width / 2,
+        150,
+        'FINAL 30s EARTHQUAKE!',
+        '#F59E0B'
+      );
+    }
+
+    this.earthquakeTimer -= dt;
+    if (this.earthquakeTimer <= 0) {
+      this.earthquakeTimer = 3.8;
+      const nextPlatform = this.map.platforms.find(
+        (p) => p.outerCollapse && !this.collapsedPlatformIds.has(p.id)
+      );
+      if (nextPlatform) {
+        this.collapsedPlatformIds.add(nextPlatform.id);
+        for (const cam of this.cameras) {
+          cam.shake = Math.max(cam.shake, 11);
+        }
+        soundEngine.playEarthquake();
+        this.spawnDebris(
+          nextPlatform.x + nextPlatform.w / 2,
+          nextPlatform.y + nextPlatform.h / 2,
+          '#64748B',
+          18,
+          'debris'
+        );
+        this.spawnFloatingText(
+          nextPlatform.x + nextPlatform.w / 2,
+          nextPlatform.y - 16,
+          'LEDGE COLLAPSED!',
+          '#EF4444'
+        );
+        this.pendingNetEvents.push({
+          kind: 'crumble',
+          x: nextPlatform.x,
+          y: nextPlatform.y,
+          w: nextPlatform.w,
+          h: nextPlatform.h,
+        });
+      }
+    }
+  }
+
+  private updateSecurityTurret(dt: number): void {
+    const t = this.turret;
+    if (!t) return;
+
+    if (t.muzzleFlashTimer > 0) {
+      t.muzzleFlashTimer = Math.max(0, t.muzzleFlashTimer - dt);
+    }
+
+    // Check if any living fighter is near the hacking terminal
+    let hacker: FighterEntity | null = null;
+    const teamMode = this.isTeamMode();
+    for (const f of this.fighters) {
+      if (!f.alive || f.isLastStand) continue;
+      const alreadyOwned =
+        t.ownerId === f.id || (teamMode && t.ownerTeam && t.ownerTeam === (f.team || 'alpha'));
+      if (alreadyOwned) continue;
+      if (Math.hypot(f.x - t.terminalX, f.y - t.terminalY) <= 68) {
+        hacker = f;
+        break;
+      }
+    }
+
+    if (hacker) {
+      t.hackingFighterId = hacker.id;
+      t.hackingPlayerName = hacker.name;
+      t.hackProgress = Math.min(1, t.hackProgress + dt / 3.0);
+      if (t.hackProgress >= 1) {
+        t.ownerId = hacker.id;
+        t.ownerTeam = teamMode ? hacker.team || 'alpha' : null;
+        t.ownerName = hacker.name;
+        t.hackProgress = 0;
+        t.hackingFighterId = null;
+        t.hackingPlayerName = null;
+        soundEngine.playTurretHacked();
+        this.spawnFloatingText(t.terminalX, t.terminalY - 42, 'TURRET HACKED!', '#22D3EE');
+        this.spawnBurst(t.terminalX, t.terminalY - 12, '#22D3EE', 14, 180);
+        this.pendingNetEvents.push({
+          kind: 'turret_hack',
+          x: t.terminalX,
+          y: t.terminalY,
+          text: hacker.name,
+        });
+      }
+    } else {
+      t.hackingFighterId = null;
+      t.hackingPlayerName = null;
+      t.hackProgress = Math.max(0, t.hackProgress - dt * 0.4);
+    }
+
+    // Target nearest valid enemy (or anyone if neutral)
+    let bestTarget: FighterEntity | null = null;
+    let bestDist = 640;
+    for (const f of this.fighters) {
+      if (!f.alive || f.spawnInvulnTimer > 0) continue;
+      if (t.ownerId && f.id === t.ownerId) continue;
+      if (teamMode && t.ownerTeam && (f.team || 'alpha') === t.ownerTeam) continue;
+      const dist = Math.hypot(f.x - t.x, f.y - t.y);
+      if (dist <= bestDist && this.hasLineOfSight(t.x, t.y + 12, f.x, f.y - 8)) {
+        bestDist = dist;
+        bestTarget = f;
+      }
+    }
+
+    if (bestTarget) {
+      const targetAngle = Math.atan2(bestTarget.y - 8 - (t.y + 10), bestTarget.x - t.x);
+      t.aimAngle = targetAngle;
+      t.fireCooldown -= dt;
+      if (t.fireCooldown <= 0) {
+        t.fireCooldown = 0.24;
+        t.muzzleFlashTimer = 0.08;
+        soundEngine.playTurretShoot();
+        this.geometryBeams.push({
+          id: this.nextBeamId++,
+          ownerId: t.ownerId || 'arena',
+          x: t.x + Math.cos(targetAngle) * 18,
+          y: t.y + 10 + Math.sin(targetAngle) * 18,
+          angle: targetAngle,
+          length: bestDist,
+          life: 0.1,
+          maxLife: 0.1,
+          color: t.ownerId ? '#22D3EE' : '#F43F5E',
+        });
+        this.applyDamage(bestTarget, 11, t.ownerId || 'arena', 'turret', false);
+      }
+    } else {
+      t.aimAngle = Math.PI / 2 + Math.sin(this.elapsedSec * 1.6) * 0.7;
+    }
+  }
+
+  private updateGlassFloors(dt: number): void {
+    for (const gf of this.glassFloors) {
+      if (gf.alive) continue;
+      gf.respawnTimer -= dt;
+      if (gf.respawnTimer <= 0) {
+        gf.alive = true;
+        gf.cracks = 0;
+      }
+    }
+  }
+
+  private damageGlassFloor(gf: GlassFloorEntity, instant = false): void {
+    if (!gf.alive) return;
+    gf.cracks += instant ? 2 : 1;
+    if (gf.cracks >= 2) {
+      gf.alive = false;
+      gf.respawnTimer = 16;
+      soundEngine.playGlassShatter();
+      this.spawnDebris(gf.x + gf.w / 2, gf.y + gf.h / 2, '#BAE6FD', 14, 'glass');
+      this.pendingNetEvents.push({
+        kind: 'glass_shatter',
+        x: gf.x,
+        y: gf.y,
+        w: gf.w,
+        h: gf.h,
+      });
+    } else {
+      soundEngine.playGlassCrack();
+      this.spawnBurst(gf.x + gf.w / 2, gf.y + gf.h / 2, '#E0F2FE', 6, 110);
+    }
+  }
+
+  private updateGoldenAirdrop(dt: number): void {
+    const ad = this.goldenAirdrop;
+    if (!ad.active) return;
+
+    ad.life -= dt;
+    if (ad.life <= 0) {
+      ad.active = false;
+      return;
+    }
+
+    if (!ad.landed) {
+      ad.y += ad.vy * dt;
+      for (const p of this.getActivePlatforms()) {
+        if (ad.x >= p.x && ad.x <= p.x + p.w && ad.y + 18 >= p.y && ad.y + 18 <= p.y + 30) {
+          ad.y = p.y - 18;
+          ad.landed = true;
+          soundEngine.playPickup();
+          this.spawnBurst(ad.x, ad.y, '#FACC15', 14, 190);
+          break;
+        }
+      }
+      if (!ad.landed && ad.y >= this.map.height - 64) {
+        ad.y = this.map.height - 64;
+        ad.landed = true;
+      }
+    }
+
+    for (const f of this.fighters) {
+      if (!f.alive || f.isLastStand || f.isBoss) continue;
+      if (Math.hypot(f.x - ad.x, f.y - ad.y) < 42) {
+        ad.active = false;
+        f.primaryWeaponId = 'orbital_laser';
+        f.activeSlot = 'primary';
+        f.weaponId = 'orbital_laser';
+        f.primaryAmmo = this.getEffectiveClipSize(f, 'orbital_laser');
+        f.ammo = f.primaryAmmo;
+        f.isReloading = false;
+        f.reloadTimerMs = 0;
+        f.dualWield = null;
+        f.dualWieldAmmo = 0;
+        soundEngine.playPowerUpMystery();
+        this.spawnBurst(f.x, f.y - 10, '#FACC15', 18, 240);
+        this.spawnFloatingText(f.x, f.y - 44, 'MYTHIC ORBITAL LASER!', '#FACC15');
+        break;
+      }
+    }
+  }
+
+  private updateHolograms(dt: number): void {
+    const activePlatforms = this.getActivePlatforms();
+    const kept: HologramCloneEntity[] = [];
+    for (const h of this.holograms) {
+      h.life -= dt;
+      if (h.life <= 0) continue;
+      h.vy = Math.min(540, h.vy + GRAVITY * dt * 0.85);
+      h.x += h.vx * dt;
+      h.y += h.vy * dt;
+      if (h.x < 80 || h.x > this.map.width - 80) {
+        h.vx = -h.vx;
+        h.facing = h.vx >= 0 ? 1 : -1;
+      }
+      for (const p of activePlatforms) {
+        if (h.vy >= 0 && h.x >= p.x && h.x <= p.x + p.w && h.y + 24 >= p.y && h.y + 24 <= p.y + 22) {
+          h.y = p.y - 24;
+          h.vy = -120;
+        }
+      }
+      kept.push(h);
+    }
+    this.holograms = kept;
+  }
+
+  private updateAfterimages(dt: number): void {
+    for (const ag of this.afterimages) {
+      ag.alpha -= dt * 3.4;
+    }
+    this.afterimages = this.afterimages.filter((ag) => ag.alpha > 0.04);
+  }
+
+  private updateEmotesAndSprays(dt: number): void {
+    for (const em of this.emotePopups) {
+      em.life -= dt;
+      const owner = this.fighters.find((f) => f.id === em.fighterId);
+      if (owner && owner.alive) {
+        em.x = owner.x;
+        em.y = owner.y - 50;
+      }
+    }
+    this.emotePopups = this.emotePopups.filter((em) => em.life > 0);
+
+    for (const sp of this.wallSprays) {
+      sp.life -= dt;
+    }
+    this.wallSprays = this.wallSprays.filter((sp) => sp.life > 0);
+  }
+
   private hasLineOfSight(x1: number, y1: number, x2: number, y2: number): boolean {
     const steps = 14;
+    const activePlatforms = this.getActivePlatforms();
     for (let i = 1; i < steps; i++) {
       const t = i / steps;
       const sx = x1 + (x2 - x1) * t;
       const sy = y1 + (y2 - y1) * t;
-      for (const p of this.map.platforms) {
+      for (const p of activePlatforms) {
         if (p.kind === 'oneway') continue;
         if (this.pointInRect(sx, sy, p.x, p.y, p.w, p.h)) return false;
       }
@@ -3510,10 +5586,11 @@ export class ArenaGameEngine {
     const step = 12;
     const dx = Math.cos(f.aimAngle);
     const dy = Math.sin(f.aimAngle);
+    const activePlatforms = this.getActivePlatforms();
     for (let dist = 24; dist <= maxRange; dist += step) {
       const rx = f.x + dx * dist;
       const ry = f.y - 4 + dy * dist;
-      for (const p of this.map.platforms) {
+      for (const p of activePlatforms) {
         if (p.kind !== 'oneway' && this.pointInRect(rx, ry, p.x, p.y, p.w, p.h)) {
           return null;
         }
@@ -3553,13 +5630,20 @@ export class ArenaGameEngine {
 
   private spawnJetpackFlame(f: FighterEntity): void {
     const flame = FLAME_COSMETICS.find((fl) => fl.id === f.flameId) || FLAME_COSMETICS[0];
+    const rainbowColors = ['#EF4444', '#F97316', '#FACC15', '#22C55E', '#38BDF8', '#A855F7'];
+    const isSugarRush = f.characterId === 'captain_jalebi' && f.ultActiveTimer > 0;
+    const color = isSugarRush
+      ? rainbowColors[Math.floor(Math.random() * rainbowColors.length)]
+      : Math.random() > 0.4
+      ? flame.primaryColor
+      : flame.secondaryColor;
     this.spawnParticle({
       x: f.x - f.facing * 12 + (Math.random() - 0.5) * 4,
       y: f.y + 10,
       vx: (Math.random() - 0.5) * 40,
       vy: 120 + Math.random() * 80,
-      size: 3 + Math.random() * 2.5,
-      color: Math.random() > 0.4 ? flame.primaryColor : flame.secondaryColor,
+      size: isSugarRush ? 4.2 + Math.random() * 2.5 : 3 + Math.random() * 2.5,
+      color,
       alpha: 0.9,
       life: 0.24,
       maxLife: 0.24,
@@ -3707,6 +5791,7 @@ export class ArenaGameEngine {
         activeSlot: f.activeSlot,
         meleeWeaponId: f.meleeWeaponId,
         weaponMastery: f.weaponMastery,
+        gunWrap: f.gunWrap,
         dualWield: f.dualWield,
         ultActiveTimer: f.ultActiveTimer,
         muzzleFlashTimer: f.muzzleFlashTimer,
@@ -3721,8 +5806,25 @@ export class ArenaGameEngine {
         fuelBuffTimer: f.fuelBuffTimer,
         shieldHp: f.shieldHp,
         shieldBuffTimer: f.shieldBuffTimer,
+        freezeTimer: f.freezeTimer,
+        empDisableTimer: f.empDisableTimer,
         speechText: f.speechText,
         speechTimer: f.speechTimer,
+        stunTimer: f.stunTimer,
+        danceTimer: f.danceTimer,
+        grappleActive: f.grappleActive,
+        grappleX: Math.round(f.grappleX),
+        grappleY: Math.round(f.grappleY),
+        dashTimer: f.dashTimer,
+        shrinkTimer: f.shrinkTimer,
+        megaSizeTimer: f.megaSizeTimer,
+        bubbleShieldHp: f.bubbleShieldHp,
+        bubbleShieldTimer: f.bubbleShieldTimer,
+        isLastStand: f.isLastStand,
+        lastStandTimer: f.lastStandTimer,
+        isVip: f.isVip,
+        isBoss: f.isBoss,
+        nemesisKillerIds: [...f.nemesisKillerIds],
       })),
       projectiles: this.projectiles.map((p) => ({
         id: p.id,
@@ -3736,6 +5838,26 @@ export class ArenaGameEngine {
         color: p.color,
         isRocket: p.isRocket,
         isHoming: p.isHoming,
+        isChappal: p.isChappal,
+        stuck: p.stuck,
+      })),
+      cookerBombs: this.cookerBombs.map((cb) => ({
+        id: cb.id,
+        x: Math.round(cb.x),
+        y: Math.round(cb.y),
+        fuseTimer: cb.fuseTimer,
+        maxFuse: cb.maxFuse,
+      })),
+      geometryBeams: this.geometryBeams.map((bm) => ({
+        id: bm.id,
+        x: Math.round(bm.x),
+        y: Math.round(bm.y),
+        angle: bm.angle,
+        length: bm.length,
+        life: bm.life,
+        maxLife: bm.maxLife,
+        color: bm.color,
+        isGossip: bm.isGossip,
       })),
       grenades: this.grenades.map((g) => ({
         id: g.id,
@@ -3782,7 +5904,64 @@ export class ArenaGameEngine {
         type: dw.type,
         life: dw.life,
       })),
+      weaponDrops: this.weaponDrops.map((wd) => ({
+        id: wd.id,
+        x: Math.round(wd.x),
+        y: Math.round(wd.y),
+        weaponId: wd.weaponId,
+        life: wd.life,
+      })),
       floatingTexts: this.floatingTexts.map((ft) => ({ ...ft })),
+      chaos: { ...this.chaosState },
+      train: this.subwayTrain
+        ? {
+            active: this.subwayTrain.active,
+            warningTimerSec: this.subwayTrain.warningTimerSec,
+            x: Math.round(this.subwayTrain.x),
+            y: Math.round(this.subwayTrain.y),
+            w: this.subwayTrain.w,
+            h: this.subwayTrain.h,
+            dir: this.subwayTrain.dir,
+            carCount: this.subwayTrain.carCount,
+          }
+        : undefined,
+      turret: this.turret
+        ? {
+            x: this.turret.x,
+            y: this.turret.y,
+            terminalX: this.turret.terminalX,
+            terminalY: this.turret.terminalY,
+            ownerTeam: this.turret.ownerTeam,
+            ownerId: this.turret.ownerId,
+            ownerName: this.turret.ownerName,
+            hackProgress: this.turret.hackProgress,
+            hackingPlayerName: this.turret.hackingPlayerName,
+            aimAngle: this.turret.aimAngle,
+            muzzleFlashTimer: this.turret.muzzleFlashTimer,
+          }
+        : undefined,
+      airdrop: this.goldenAirdrop.active
+        ? {
+            active: true,
+            landed: this.goldenAirdrop.landed,
+            x: Math.round(this.goldenAirdrop.x),
+            y: Math.round(this.goldenAirdrop.y),
+          }
+        : undefined,
+      glassFloors: this.glassFloors.map((gf) => ({ ...gf })),
+      collapsedPlatformIds: Array.from(this.collapsedPlatformIds),
+      wallSprays: this.wallSprays.map((sp) => ({ ...sp })),
+      emotePopups: this.emotePopups.map((em) => ({ ...em })),
+      holograms: this.holograms.map((h) => ({
+        id: h.id,
+        x: Math.round(h.x),
+        y: Math.round(h.y),
+        facing: h.facing,
+        characterId: h.characterId,
+        outfitId: h.outfitId,
+        life: h.life,
+      })),
+      afterimages: this.afterimages.map((ag) => ({ ...ag })),
       killFeed: [...this.killFeed],
       announcer: this.activeAnnouncer ? { ...this.activeAnnouncer } : null,
     });
@@ -3851,16 +6030,65 @@ export class ArenaGameEngine {
       {
         map: this.map,
         grenades: this.grenades,
+        cookerBombs: this.cookerBombs,
+        geometryBeams: this.geometryBeams,
         smokeClouds: this.smokeClouds,
         airstrikes: this.airstrikes,
         scorchDecals: this.scorchDecals,
         dualWieldDrops: this.dualWieldDrops,
+        weaponDrops: this.weaponDrops,
         isTeamMode: this.isTeamMode(),
         teamScores: this.teamScores,
         hardpoint: this.rules.gameMode === 'hardpoint' ? this.hardpointState : undefined,
         domination: this.rules.gameMode === 'domination' ? this.dominationState : undefined,
         ctf: this.rules.gameMode === 'ctf' ? this.ctfState : undefined,
         uavActiveForCam,
+        chaos: this.chaosState,
+        train: this.subwayTrain
+          ? {
+              active: this.subwayTrain.active,
+              warningTimerSec: this.subwayTrain.warningTimerSec,
+              x: this.subwayTrain.x,
+              y: this.subwayTrain.y,
+              w: this.subwayTrain.w,
+              h: this.subwayTrain.h,
+              dir: this.subwayTrain.dir,
+              carCount: this.subwayTrain.carCount,
+            }
+          : undefined,
+        turret: this.turret
+          ? {
+              x: this.turret.x,
+              y: this.turret.y,
+              terminalX: this.turret.terminalX,
+              terminalY: this.turret.terminalY,
+              ownerTeam: this.turret.ownerTeam,
+              ownerId: this.turret.ownerId,
+              ownerName: this.turret.ownerName,
+              hackProgress: this.turret.hackProgress,
+              hackingPlayerName: this.turret.hackingPlayerName,
+              aimAngle: this.turret.aimAngle,
+              muzzleFlashTimer: this.turret.muzzleFlashTimer,
+            }
+          : undefined,
+        portals: this.portals,
+        jumpPads: this.jumpPads,
+        windVents: this.windVents,
+        glassFloors: this.glassFloors,
+        airdrop: this.goldenAirdrop.active
+          ? {
+              active: true,
+              landed: this.goldenAirdrop.landed,
+              x: this.goldenAirdrop.x,
+              y: this.goldenAirdrop.y,
+            }
+          : undefined,
+        collapsedPlatformIds: Array.from(this.collapsedPlatformIds),
+        wallSprays: this.wallSprays,
+        emotePopups: this.emotePopups,
+        holograms: this.holograms,
+        afterimages: this.afterimages,
+        earthquakeActive: this.earthquakeActive,
       }
     );
   }
@@ -3903,6 +6131,7 @@ export class ArenaGameEngine {
           secondaryWeaponId: f.secondaryWeaponId,
           meleeWeaponId: f.meleeWeaponId,
           weaponMastery: f.weaponMastery,
+          gunWrap: f.gunWrap,
           ammo: f.ammo,
           maxAmmo: maxClip,
           isReloading: f.isReloading,
@@ -3918,6 +6147,8 @@ export class ArenaGameEngine {
           fuelBuffTimer: f.fuelBuffTimer,
           shieldHp: Math.round(f.shieldHp),
           shieldBuffTimer: f.shieldBuffTimer,
+          freezeTimer: f.freezeTimer,
+          empDisableTimer: f.empDisableTimer,
           wallSliding: f.wallSlideDir !== 0,
           grenades: f.grenades,
           grenadeType: f.grenadeType,
@@ -3936,6 +6167,20 @@ export class ArenaGameEngine {
           kothPoints: Math.round(f.kothPoints),
           inPodium: f.inPodium,
           carryingFlagTeam: f.carryingFlagTeam || null,
+          grappleActive: f.grappleActive,
+          dashCooldownPct: Math.max(0, Math.min(1, 1 - f.dashCooldown / 1.4)),
+          shrinkTimer: f.shrinkTimer,
+          megaSizeTimer: f.megaSizeTimer,
+          bubbleShieldHp: Math.round(f.bubbleShieldHp),
+          bubbleShieldTimer: f.bubbleShieldTimer,
+          isLastStand: f.isLastStand,
+          lastStandTimer: f.lastStandTimer,
+          isVip: f.isVip,
+          isBoss: f.isBoss,
+          gunGameTier: f.gunGameTier,
+          nemesisKillerIds: [...f.nemesisKillerIds],
+          afterlifeKills: f.afterlifeKillsCount,
+          nemesisKills: f.nemesisKillsCount,
         };
       }),
       killFeed: [...this.killFeed],
@@ -3952,6 +6197,12 @@ export class ArenaGameEngine {
         y: dw.y,
         type: dw.type,
       })),
+      weaponDrops: this.weaponDrops.map((wd) => ({
+        id: wd.id,
+        x: wd.x,
+        y: wd.y,
+        weaponId: wd.weaponId,
+      })),
       announcer: this.activeAnnouncer ? { ...this.activeAnnouncer } : null,
       aimedWalls,
       killIcons: this.activeKillIcons.filter((k) => {
@@ -3963,6 +6214,69 @@ export class ArenaGameEngine {
       hardpoint: this.rules.gameMode === 'hardpoint' ? this.hardpointState : undefined,
       domination: this.rules.gameMode === 'domination' ? this.dominationState : undefined,
       ctf: this.rules.gameMode === 'ctf' ? this.ctfState : undefined,
+      chaos: { ...this.chaosState },
+      train: this.subwayTrain
+        ? {
+            active: this.subwayTrain.active,
+            warningTimerSec: this.subwayTrain.warningTimerSec,
+            x: Math.round(this.subwayTrain.x),
+            y: Math.round(this.subwayTrain.y),
+            w: this.subwayTrain.w,
+            h: this.subwayTrain.h,
+            dir: this.subwayTrain.dir,
+            carCount: this.subwayTrain.carCount,
+          }
+        : undefined,
+      turret: this.turret
+        ? {
+            x: this.turret.x,
+            y: this.turret.y,
+            terminalX: this.turret.terminalX,
+            terminalY: this.turret.terminalY,
+            ownerTeam: this.turret.ownerTeam,
+            ownerId: this.turret.ownerId,
+            ownerName: this.turret.ownerName,
+            hackProgress: this.turret.hackProgress,
+            hackingPlayerName: this.turret.hackingPlayerName,
+            aimAngle: this.turret.aimAngle,
+            muzzleFlashTimer: this.turret.muzzleFlashTimer,
+          }
+        : undefined,
+      airdrop: this.goldenAirdrop.active
+        ? {
+            active: true,
+            landed: this.goldenAirdrop.landed,
+            x: Math.round(this.goldenAirdrop.x),
+            y: Math.round(this.goldenAirdrop.y),
+          }
+        : undefined,
+      earthquakeActive: this.earthquakeActive,
+      gunGame:
+        this.rules.gameMode === 'gun_game'
+          ? (() => {
+              const leader = [...this.fighters].sort(
+                (a, b) => b.gunGameTier - a.gunGameTier || b.kills - a.kills
+              )[0];
+              return {
+                leaderName: leader?.name || '',
+                leaderTier: leader?.gunGameTier || 0,
+                maxTiers: GUN_GAME_LADDER.length + 1,
+              };
+            })()
+          : undefined,
+      bossRaid:
+        this.rules.gameMode === 'boss_raid'
+          ? (() => {
+              const boss = this.fighters.find((f) => f.isBoss);
+              return {
+                bossName: boss?.name || 'MEGA BARON VOLTAGE',
+                hp: Math.round(boss?.hp || 0),
+                maxHp: boss?.maxHp || 1500,
+                alive: Boolean(boss?.alive),
+                empCooldownSec: Math.max(0, Math.round(boss?.bossEmpTimer || 0)),
+              };
+            })()
+          : undefined,
     });
   }
 
@@ -4005,6 +6319,7 @@ export class ArenaGameEngine {
         secondaryWeaponId: f.secondaryWeaponId,
         meleeWeaponId: f.meleeWeaponId,
         weaponMastery: f.weaponMastery,
+        gunWrap: f.gunWrap,
         ammo: f.ammo,
         isReloading: f.isReloading,
         reloadProgress: f.isReloading
@@ -4025,6 +6340,8 @@ export class ArenaGameEngine {
         fuelBuffTimer: f.fuelBuffTimer,
         shieldHp: f.shieldHp,
         shieldBuffTimer: f.shieldBuffTimer,
+        freezeTimer: f.freezeTimer,
+        empDisableTimer: f.empDisableTimer,
         grenades: f.grenades,
         grenadeType: f.grenadeType,
         dualWield: f.dualWield,
@@ -4035,6 +6352,22 @@ export class ArenaGameEngine {
         kothPoints: f.kothPoints,
         speechText: f.speechText,
         speechTimer: f.speechTimer,
+        stunTimer: f.stunTimer,
+        danceTimer: f.danceTimer,
+        grappleActive: f.grappleActive,
+        grappleX: Math.round(f.grappleX),
+        grappleY: Math.round(f.grappleY),
+        dashTimer: f.dashTimer,
+        shrinkTimer: f.shrinkTimer,
+        megaSizeTimer: f.megaSizeTimer,
+        bubbleShieldHp: f.bubbleShieldHp,
+        bubbleShieldTimer: f.bubbleShieldTimer,
+        isLastStand: f.isLastStand,
+        lastStandTimer: f.lastStandTimer,
+        isVip: f.isVip,
+        isBoss: f.isBoss,
+        gunGameTier: f.gunGameTier,
+        nemesisKillerIds: [...f.nemesisKillerIds],
       })),
       projectiles: this.projectiles.map((p) => ({
         id: p.id,
@@ -4048,6 +6381,26 @@ export class ArenaGameEngine {
         color: p.color,
         isRocket: p.isRocket,
         isHoming: p.isHoming,
+        isChappal: p.isChappal,
+        stuck: p.stuck,
+      })),
+      cookerBombs: this.cookerBombs.map((cb) => ({
+        id: cb.id,
+        x: Math.round(cb.x),
+        y: Math.round(cb.y),
+        fuseTimer: cb.fuseTimer,
+        maxFuse: cb.maxFuse,
+      })),
+      geometryBeams: this.geometryBeams.map((bm) => ({
+        id: bm.id,
+        x: Math.round(bm.x),
+        y: Math.round(bm.y),
+        angle: bm.angle,
+        length: bm.length,
+        life: bm.life,
+        maxLife: bm.maxLife,
+        color: bm.color,
+        isGossip: bm.isGossip,
       })),
       grenades: this.grenades.map((g) => ({
         id: g.id,
@@ -4079,8 +6432,18 @@ export class ArenaGameEngine {
         type: dw.type,
         life: dw.life,
       })),
+      weaponDrops: this.weaponDrops.map((wd) => ({
+        id: wd.id,
+        x: Math.round(wd.x),
+        y: Math.round(wd.y),
+        weaponId: wd.weaponId,
+        life: wd.life,
+      })),
       barrels: this.barrels.map((b) => ({
         id: b.id,
+        x: Math.round(b.x),
+        y: Math.round(b.y),
+        launched: b.launched,
         alive: b.alive,
         hitFlashTimer: b.hitFlashTimer,
       })),
@@ -4103,6 +6466,57 @@ export class ArenaGameEngine {
         type: pu.type,
         life: pu.life,
       })),
+      chaos: { ...this.chaosState },
+      train: this.subwayTrain
+        ? {
+            active: this.subwayTrain.active,
+            warningTimerSec: this.subwayTrain.warningTimerSec,
+            x: Math.round(this.subwayTrain.x),
+            y: Math.round(this.subwayTrain.y),
+            w: this.subwayTrain.w,
+            h: this.subwayTrain.h,
+            dir: this.subwayTrain.dir,
+            carCount: this.subwayTrain.carCount,
+          }
+        : undefined,
+      turret: this.turret
+        ? {
+            x: this.turret.x,
+            y: this.turret.y,
+            terminalX: this.turret.terminalX,
+            terminalY: this.turret.terminalY,
+            ownerTeam: this.turret.ownerTeam,
+            ownerId: this.turret.ownerId,
+            ownerName: this.turret.ownerName,
+            hackProgress: this.turret.hackProgress,
+            hackingPlayerName: this.turret.hackingPlayerName,
+            aimAngle: this.turret.aimAngle,
+            muzzleFlashTimer: this.turret.muzzleFlashTimer,
+          }
+        : undefined,
+      airdrop: this.goldenAirdrop.active
+        ? {
+            active: true,
+            landed: this.goldenAirdrop.landed,
+            x: Math.round(this.goldenAirdrop.x),
+            y: Math.round(this.goldenAirdrop.y),
+          }
+        : undefined,
+      glassFloors: this.glassFloors.map((gf) => ({ ...gf })),
+      collapsedPlatformIds: Array.from(this.collapsedPlatformIds),
+      wallSprays: this.wallSprays.map((sp) => ({ ...sp })),
+      emotePopups: this.emotePopups.map((em) => ({ ...em })),
+      holograms: this.holograms.map((h) => ({
+        id: h.id,
+        x: Math.round(h.x),
+        y: Math.round(h.y),
+        facing: h.facing,
+        characterId: h.characterId,
+        outfitId: h.outfitId,
+        life: h.life,
+      })),
+      afterimages: this.afterimages.map((ag) => ({ ...ag })),
+      earthquakeActive: this.earthquakeActive,
       teamScores: this.teamScores,
       hardpoint: this.rules.gameMode === 'hardpoint' ? this.hardpointState : undefined,
       domination: this.rules.gameMode === 'domination' ? this.dominationState : undefined,
@@ -4142,6 +6556,7 @@ export class ArenaGameEngine {
           weaponId: sf.weaponId,
           secondaryWeaponId: sf.secondaryWeaponId,
           meleeWeaponId: sf.meleeWeaponId,
+          gunWrap: sf.gunWrap || 'none',
           x: sf.x,
           y: sf.y,
         });
@@ -4167,6 +6582,7 @@ export class ArenaGameEngine {
       if (sf.secondaryWeaponId) f.secondaryWeaponId = sf.secondaryWeaponId;
       if (sf.meleeWeaponId) f.meleeWeaponId = sf.meleeWeaponId;
       f.weaponMastery = sf.weaponMastery || 'none';
+      f.gunWrap = sf.gunWrap || 'none';
       f.ammo = sf.ammo;
       f.isReloading = sf.isReloading;
       f.ultCharge = sf.ultCharge;
@@ -4184,6 +6600,8 @@ export class ArenaGameEngine {
       f.fuelBuffTimer = sf.fuelBuffTimer;
       f.shieldHp = sf.shieldHp;
       f.shieldBuffTimer = sf.shieldBuffTimer;
+      f.freezeTimer = sf.freezeTimer ?? 0;
+      f.empDisableTimer = sf.empDisableTimer ?? 0;
       f.grenades = sf.grenades ?? f.grenades;
       f.grenadeType = sf.grenadeType ?? f.grenadeType;
       f.dualWield = sf.dualWield ?? null;
@@ -4194,6 +6612,79 @@ export class ArenaGameEngine {
       f.kothPoints = sf.kothPoints ?? 0;
       f.speechText = sf.speechText ?? '';
       f.speechTimer = sf.speechTimer ?? 0;
+      f.stunTimer = sf.stunTimer ?? 0;
+      f.danceTimer = sf.danceTimer ?? 0;
+      f.grappleActive = Boolean(sf.grappleActive);
+      f.grappleX = sf.grappleX ?? 0;
+      f.grappleY = sf.grappleY ?? 0;
+      f.dashTimer = sf.dashTimer ?? 0;
+      f.shrinkTimer = sf.shrinkTimer ?? 0;
+      f.megaSizeTimer = sf.megaSizeTimer ?? 0;
+      f.bubbleShieldHp = sf.bubbleShieldHp ?? 0;
+      f.bubbleShieldTimer = sf.bubbleShieldTimer ?? 0;
+      f.isLastStand = Boolean(sf.isLastStand);
+      f.lastStandTimer = sf.lastStandTimer ?? 0;
+      f.isVip = Boolean(sf.isVip);
+      f.isBoss = Boolean(sf.isBoss);
+      if (sf.gunGameTier !== undefined) f.gunGameTier = sf.gunGameTier;
+      if (sf.nemesisKillerIds) f.nemesisKillerIds = sf.nemesisKillerIds;
+    }
+
+    if (snap.chaos) this.chaosState = snap.chaos;
+    if (snap.train && this.subwayTrain) {
+      this.subwayTrain.active = snap.train.active;
+      this.subwayTrain.warningTimerSec = snap.train.warningTimerSec;
+      this.subwayTrain.x = snap.train.x;
+      this.subwayTrain.y = snap.train.y;
+      this.subwayTrain.dir = snap.train.dir;
+    }
+    if (snap.turret && this.turret) {
+      this.turret.ownerTeam = snap.turret.ownerTeam;
+      this.turret.ownerId = snap.turret.ownerId;
+      this.turret.ownerName = snap.turret.ownerName;
+      this.turret.hackProgress = snap.turret.hackProgress;
+      this.turret.hackingPlayerName = snap.turret.hackingPlayerName;
+      this.turret.aimAngle = snap.turret.aimAngle;
+      this.turret.muzzleFlashTimer = snap.turret.muzzleFlashTimer;
+    }
+    if (snap.airdrop) {
+      this.goldenAirdrop = {
+        active: snap.airdrop.active,
+        landed: snap.airdrop.landed,
+        x: snap.airdrop.x,
+        y: snap.airdrop.y,
+        vy: 0,
+        life: 25,
+      };
+    } else {
+      this.goldenAirdrop.active = false;
+    }
+    if (snap.glassFloors) {
+      this.glassFloors = snap.glassFloors;
+    }
+    if (snap.collapsedPlatformIds) {
+      this.collapsedPlatformIds = new Set(snap.collapsedPlatformIds);
+    }
+    if (snap.wallSprays) {
+      this.wallSprays = snap.wallSprays;
+    }
+    if (snap.emotePopups) {
+      this.emotePopups = snap.emotePopups;
+    }
+    if (snap.holograms) {
+      this.holograms = snap.holograms.map((h) => ({
+        ...h,
+        ownerId: '',
+        vx: 0,
+        vy: 0,
+        fireTimer: 0,
+      }));
+    }
+    if (snap.afterimages) {
+      this.afterimages = snap.afterimages;
+    }
+    if (snap.earthquakeActive !== undefined) {
+      this.earthquakeActive = snap.earthquakeActive;
     }
 
     this.projectiles = snap.projectiles.map((p) => ({
@@ -4202,6 +6693,19 @@ export class ArenaGameEngine {
       damage: 0,
       explosionRadius: 0,
       life: 1,
+    }));
+
+    this.cookerBombs = (snap.cookerBombs || []).map((cb) => ({
+      ...cb,
+      ownerId: '',
+      vx: 0,
+      vy: 0,
+      whistleTimer: 0,
+    }));
+
+    this.geometryBeams = (snap.geometryBeams || []).map((bm) => ({
+      ...bm,
+      ownerId: '',
     }));
 
     this.grenades = (snap.grenades || []).map((g) => ({
@@ -4226,12 +6730,22 @@ export class ArenaGameEngine {
       maxLife: 20,
       bobPhase: 0,
     }));
+    this.weaponDrops = (snap.weaponDrops || []).map((wd) => ({
+      ...wd,
+      vx: 0,
+      vy: 0,
+      maxLife: 24,
+      bobPhase: 0,
+    }));
 
     snap.barrels.forEach((sb) => {
       const b = this.barrels.find((br) => br.id === sb.id);
       if (b) {
         b.alive = sb.alive;
         b.hitFlashTimer = sb.hitFlashTimer;
+        if (sb.x !== undefined) b.x = sb.x;
+        if (sb.y !== undefined) b.y = sb.y;
+        if (sb.launched !== undefined) b.launched = sb.launched;
       }
     });
 
@@ -4284,6 +6798,16 @@ export class ArenaGameEngine {
       else if (ev.kind === 'airstrike') soundEngine.playAirstrikeWhistle();
       else if (ev.kind === 'ult') soundEngine.playUltimate();
       else if (ev.kind === 'multikill' && ev.streakCount) soundEngine.playMultikill(ev.streakCount);
+      else if (ev.kind === 'chaos_warning') soundEngine.playChaosWarning();
+      else if (ev.kind === 'train_siren') soundEngine.playTrainSiren();
+      else if (ev.kind === 'portal_warp') soundEngine.playPortalWarp();
+      else if (ev.kind === 'jump_pad') soundEngine.playJumpPad();
+      else if (ev.kind === 'turret_hack') soundEngine.playTurretHacked();
+      else if (ev.kind === 'dash') soundEngine.playDash();
+      else if (ev.kind === 'grapple') soundEngine.playGrappleFire();
+      else if (ev.kind === 'emote') soundEngine.playEmote();
+      else if (ev.kind === 'spray') soundEngine.playSpray();
+      else if (ev.kind === 'nemesis_bounty') soundEngine.playNemesisBounty();
       else if (ev.kind === 'player_kill' && ev.playerIndex === localIdx) {
         this.activeKillIcons.push({
           id: this.nextKillIconId++,
@@ -4331,6 +6855,9 @@ export class ArenaGameEngine {
     }
 
     const sorted = [...this.fighters].sort((a, b) => {
+      if (this.rules.gameMode === 'gun_game') {
+        if (b.gunGameTier !== a.gunGameTier) return b.gunGameTier - a.gunGameTier;
+      }
       if (teamMode && winnerTeam) {
         const aWin = (a.team || 'alpha') === winnerTeam ? 1 : 0;
         const bWin = (b.team || 'alpha') === winnerTeam ? 1 : 0;
@@ -4359,6 +6886,8 @@ export class ArenaGameEngine {
       rankTitle: f.rank.title,
       kothPoints: Math.round(f.kothPoints),
       objectivePoints: Math.round(f.kothPoints),
+      afterlifeKills: f.afterlifeKillsCount,
+      nemesisKills: f.nemesisKillsCount,
       telemetry: {
         headshots: f.headshotsCount,
         midairKills: f.midairKillsCount,
@@ -4368,6 +6897,9 @@ export class ArenaGameEngine {
         killstreaksEarned: f.killstreaksEarnedCount,
         usedOnlySniper: !f.usedNonSniper && f.kills > 0,
         kothPoints: Math.round(f.kothPoints),
+        afterlifeKills: f.afterlifeKillsCount,
+        nemesisKills: f.nemesisKillsCount,
+        nemesisRevengeCoins: f.nemesisRevengeCoinsEarned,
       },
     }));
 

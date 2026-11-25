@@ -33,7 +33,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [tagline, setTagline] = useState('');
-  const [avatarId, setAvatarId] = useState<CharacterId>('mitron');
+  const [avatarId, setAvatarId] = useState<CharacterId>('chai_storm');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -263,7 +263,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="e.g. SenatorBlaze"
+                    placeholder="e.g. ChaiCommander"
                     className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
                     required
                   />
@@ -361,7 +361,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <label className="block text-xs font-medium text-slate-300 mb-2">
                   Select Default Candidate Avatar
                 </label>
-                <div className="grid grid-cols-3 sm:grid-cols-7 gap-2.5">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
                   {CHARACTERS.filter((c) => !c.isPremium).map((char) => (
                     <button
                       type="button"

@@ -513,6 +513,19 @@ const CircularRadarMinimap: React.FC<{
             );
           })}
 
+          {(hud.weaponDrops || []).map((wd) => {
+            const p = project(wd.x, wd.y);
+            return (
+              <polygon
+                key={`wd_${wd.id}`}
+                points={`${p.px},${p.py - 3.5} ${p.px + 3.5},${p.py} ${p.px},${p.py + 3.5} ${p.px - 3.5},${p.py}`}
+                fill="#22D3EE"
+                stroke="#0B101B"
+                strokeWidth="0.8"
+              />
+            );
+          })}
+
           {/* Fighter Dots (Teammates Emerald/Sky vs Enemies Red) */}
           {hud.fighters.map((f) => {
             if (!f.alive) return null;
@@ -612,13 +625,26 @@ const PlayerMeterCluster: React.FC<{ fighter: HudFighterSnapshot; align: 'left' 
         </div>
       </div>
 
-      {/* Active Buffs & Killstreak Perks */}
+      {/* Active Buffs & Status Effects */}
       {(fighter.speedBuffTimer > 0 ||
         fighter.fuelBuffTimer > 0 ||
         fighter.uavTimer > 0 ||
         fighter.rapidJetTimer > 0 ||
+        (fighter.freezeTimer || 0) > 0 ||
+        (fighter.empDisableTimer || 0) > 0 ||
         (fighter.shieldHp > 0 && fighter.shieldBuffTimer > 0)) && (
         <div className="mb-1.5 flex flex-wrap gap-1">
+          {(fighter.empDisableTimer || 0) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded border border-cyan-400/70 bg-cyan-950/60 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-cyan-300">
+              <Zap className="h-2.5 w-2.5 shrink-0" />
+              EMP JAM {(fighter.empDisableTimer || 0).toFixed(1)}s
+            </span>
+          )}
+          {(fighter.freezeTimer || 0) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded border border-sky-300/70 bg-sky-950/60 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-sky-200">
+              CHILLED {(fighter.freezeTimer || 0).toFixed(1)}s
+            </span>
+          )}
           {fighter.uavTimer > 0 && (
             <span className="inline-flex items-center gap-1 rounded border border-rose-400/50 bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-rose-300">
               <Radar className="h-2.5 w-2.5 shrink-0" />
@@ -656,7 +682,12 @@ const PlayerMeterCluster: React.FC<{ fighter: HudFighterSnapshot; align: 'left' 
       <div className="mb-1.5">
         <div className="flex items-center justify-between text-[11px] font-mono-tabular mb-0.5">
           <span className="text-slate-400">
-            JETPACK {fighter.wallSliding ? '· WALL SLIDE' : ''}
+            JETPACK{' '}
+            {(fighter.empDisableTimer || 0) > 0
+              ? '· EMP DISABLED'
+              : fighter.wallSliding
+              ? '· WALL SLIDE'
+              : ''}
           </span>
           <span className="text-sky-300">{fuelPct.toFixed(0)}%</span>
         </div>

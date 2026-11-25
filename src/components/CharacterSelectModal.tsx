@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Check, Coins, Crown, Lock, Sparkles, X, Zap } from 'lucide-react';
-import { CHARACTERS, DEFAULT_FREE_CHARACTERS } from '../data/catalog';
-import { unlockOrSelectCharacter } from '../db/playerDb';
-import { CharacterId, GameMode, PlayerProfile } from '../types/game';
+import { Check, Coins, Crown, Lock, Shirt, Sparkles, X, Zap } from 'lucide-react';
+import { CHARACTERS, DEFAULT_FREE_CHARACTERS, OUTFIT_COSMETICS } from '../data/catalog';
+import { unlockOrEquipCosmetic, unlockOrSelectCharacter } from '../db/playerDb';
+import { CharacterId, GameMode, OutfitId, PlayerProfile } from '../types/game';
 import { CaricatureAvatar } from './CaricatureAvatar';
 
 interface CharacterSelectModalProps {
@@ -94,9 +94,33 @@ export const CharacterSelectModal: React.FC<CharacterSelectModalProps> = ({
     setFeedback({ type: 'ok', text: `Player 2 selected ${charDef.name}.` });
   };
 
+  const handlePickOrUnlockOutfit = async (outfitId: OutfitId) => {
+    setFeedback(null);
+    const outfitDef = OUTFIT_COSMETICS.find((o) => o.id === outfitId);
+    if (!outfitDef) return;
+    if (p1Profile.isGuest) {
+      if (outfitId === 'charcoal') return;
+      setFeedback({
+        type: 'err',
+        text: `Sign in or register a profile to unlock and equip the ${outfitDef.name} outfit.`,
+      });
+      return;
+    }
+    const res = await unlockOrEquipCosmetic(p1Profile.id, 'outfit', outfitId);
+    if (!res.ok) {
+      setFeedback({ type: 'err', text: res.error });
+    } else {
+      onP1ProfileUpdated(res.profile);
+      setFeedback({
+        type: 'ok',
+        text: `Equipped ${outfitDef.name} outfit!`,
+      });
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div className="w-full max-w-4xl rounded-xl border border-slate-700/80 bg-[#111827] shadow-2xl overflow-hidden">
+      <div className="w-full max-w-5xl rounded-xl border border-slate-700/80 bg-[#111827] shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4 gap-3 flex-wrap">
           <div>
@@ -270,10 +294,70 @@ export const CharacterSelectModal: React.FC<CharacterSelectModalProps> = ({
             })}
           </div>
 
+          {/* Inline Character Outfits Bar */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/75 p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-cyan-300">
+                <Shirt className="h-3.5 w-3.5" />
+                Operator Outfits · Applies to Selected Character
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Equipped:{' '}
+                <span className="font-semibold text-white">
+                  {OUTFIT_COSMETICS.find((o) => o.id === p1Profile.cosmetics.equippedOutfit)
+                    ?.name || 'Signature Attire'}
+                </span>
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              {OUTFIT_COSMETICS.map((outfit) => {
+                const unlocked = p1Profile.cosmetics.unlockedOutfits.includes(outfit.id);
+                const equipped = p1Profile.cosmetics.equippedOutfit === outfit.id;
+                return (
+                  <button
+                    key={outfit.id}
+                    type="button"
+                    onClick={() => handlePickOrUnlockOutfit(outfit.id)}
+                    className={`flex flex-col items-center gap-1.5 rounded-lg border p-2 text-center transition-all ${
+                      equipped
+                        ? 'border-cyan-400 bg-cyan-500/15 ring-1 ring-cyan-400/40'
+                        : 'border-slate-800 bg-slate-950/70 hover:border-slate-600'
+                    }`}
+                    title={outfit.description}
+                  >
+                    <CaricatureAvatar
+                      characterId={inspectId}
+                      outfitId={outfit.id}
+                      size={38}
+                    />
+                    <div className="text-[11px] font-bold text-white leading-tight truncate w-full">
+                      {outfit.name}
+                    </div>
+                    <div
+                      className={`text-[10px] font-mono-tabular font-bold ${
+                        equipped
+                          ? 'text-emerald-300'
+                          : unlocked
+                          ? 'text-slate-400'
+                          : 'text-amber-300'
+                      }`}
+                    >
+                      {equipped ? 'Equipped' : unlocked ? 'Equip' : `${outfit.cost}c`}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Inspected / Selected Character Details */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
             <div className="flex items-center gap-3">
-              <CaricatureAvatar characterId={inspectedChar.id} size={58} />
+              <CaricatureAvatar
+                characterId={inspectedChar.id}
+                outfitId={p1Profile.cosmetics.equippedOutfit}
+                size={58}
+              />
               <div>
                 <div className="text-base font-extrabold text-white">{inspectedChar.name}</div>
                 <div className="text-xs text-slate-400">{inspectedChar.tagline}</div>

@@ -490,6 +490,7 @@ export class PeerRoomSession {
       secondaryWeapon: meta.secondaryWeapon || 'pistol',
       meleeWeapon: meta.meleeWeapon || 'knife',
       weaponMastery: meta.masteryEquipped?.[meta.startingWeapon] || 'none',
+      gunWrap: meta.gunWrap || 'none',
       xp: meta.xp,
       rankTitle: getRankForXp(meta.xp).title,
       isHost: options.isHost,

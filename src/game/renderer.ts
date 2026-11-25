@@ -1,29 +1,46 @@
 import {
   CHARACTERS,
+  EMOTE_DEFS,
   FLAME_COSMETICS,
   MELEE_WEAPONS,
   OUTFIT_COSMETICS,
+  SPRAY_DEFS,
   WEAPONS,
 } from '../data/catalog';
 import {
+  AfterimageRenderState,
+  ChaosHudState,
   CtfHudState,
   DominationHudState,
+  EmotePopupHudState,
   GameMode,
+  GlassFloorRenderState,
+  GoldenAirdropHudState,
+  GunWrapId,
   HardpointHudState,
+  HologramRenderState,
+  JumpPadRenderState,
   KothHudState,
   MeleeWeaponId,
+  PortalRenderState,
+  SubwayTrainHudState,
   TeamScoreHud,
+  TurretHudState,
+  WallSprayHudState,
   WeaponMasteryTier,
+  WindVentRenderState,
 } from '../types/game';
 import { ArenaMap, ARENA_MAP, PlatformRect } from './map';
 import {
   AirstrikeBeaconEntity,
   BarrelEntity,
   CameraState,
+  CookerBombEntity,
   DestructibleWallEntity,
   DualWieldDropEntity,
   FighterEntity,
   FloatingText,
+  GeometryBeamEntity,
   GrenadeEntity,
   Particle,
   PickupEntity,
@@ -32,6 +49,7 @@ import {
   ScorchDecal,
   SmokeCloudEntity,
   TempWallEntity,
+  WeaponDropEntity,
 } from './types';
 
 export const SKYLINE_IMAGE_URL = '/src/assets/images/dusk_city_skyline_1795269121163.jpg';
@@ -47,10 +65,13 @@ export interface CrosshairRenderInfo {
 export interface ExtraRenderState {
   map?: ArenaMap;
   grenades?: GrenadeEntity[];
+  cookerBombs?: CookerBombEntity[];
+  geometryBeams?: GeometryBeamEntity[];
   smokeClouds?: SmokeCloudEntity[];
   airstrikes?: AirstrikeBeaconEntity[];
   scorchDecals?: ScorchDecal[];
   dualWieldDrops?: DualWieldDropEntity[];
+  weaponDrops?: WeaponDropEntity[];
   isTeamMode?: boolean;
   teamScores?: TeamScoreHud;
   hardpoint?: HardpointHudState;
@@ -58,11 +79,26 @@ export interface ExtraRenderState {
   ctf?: CtfHudState;
   koth?: KothHudState;
   uavActiveForCam?: boolean[];
+  chaos?: ChaosHudState;
+  train?: SubwayTrainHudState;
+  turret?: TurretHudState;
+  portals?: PortalRenderState[];
+  jumpPads?: JumpPadRenderState[];
+  windVents?: WindVentRenderState[];
+  glassFloors?: GlassFloorRenderState[];
+  airdrop?: GoldenAirdropHudState;
+  collapsedPlatformIds?: string[];
+  wallSprays?: WallSprayHudState[];
+  emotePopups?: EmotePopupHudState[];
+  holograms?: HologramRenderState[];
+  afterimages?: AfterimageRenderState[];
+  earthquakeActive?: boolean;
 }
 
 export class ArenaRenderer {
   private bgImage: HTMLImageElement | null = null;
   private bgLoaded = false;
+  private darknessCanvas: HTMLCanvasElement | null = null;
 
   constructor() {
     if (typeof Image !== 'undefined') {
@@ -228,11 +264,44 @@ export class ArenaRenderer {
       this.drawKothPodium(ctx, extra.koth, elapsedSec);
     }
 
-    // Platforms & Procedural Surface Textures
+    // Wall Sprays on Arena Backdrop
+    for (const sp of extra.wallSprays || []) {
+      this.drawWallSpray(ctx, sp);
+    }
+
+    // Platforms & Procedural Surface Textures (respecting collapsed outer ledges)
+    const collapsedSet = new Set(extra.collapsedPlatformIds || []);
     for (const p of map.platforms) {
-      this.drawPlatform(ctx, p, elapsedSec);
+      if (collapsedSet.has(p.id)) continue;
+      this.drawPlatform(ctx, p, elapsedSec, Boolean(extra.earthquakeActive && p.outerCollapse));
     }
     this.drawRamps(ctx, map);
+
+    // Breakable Glass Floors
+    for (const gf of extra.glassFloors || []) {
+      this.drawGlassFloor(ctx, gf, elapsedSec);
+    }
+
+    // Two-Way Portals, Wind Vents & Jump Pads
+    for (const pt of extra.portals || []) {
+      this.drawPortalPair(ctx, pt, elapsedSec);
+    }
+    for (const wv of extra.windVents || []) {
+      this.drawWindVent(ctx, wv, elapsedSec);
+    }
+    for (const jp of extra.jumpPads || []) {
+      this.drawJumpPad(ctx, jp, elapsedSec);
+    }
+
+    // Hackable Security Turret & Terminal
+    if (extra.turret) {
+      this.drawSecurityTurret(ctx, extra.turret, elapsedSec);
+    }
+
+    // Moving Subway Track Warning & Express Train
+    if (map.subwayTrack && extra.train) {
+      this.drawSubwayTrain(ctx, map, extra.train, elapsedSec);
+    }
 
     // Persistent Blast Scorch Decals
     for (const sc of extra.scorchDecals || []) {
@@ -273,8 +342,16 @@ export class ArenaRenderer {
       this.drawPowerUpDrop(ctx, pu, elapsedSec);
     }
 
+    if (extra.airdrop?.active) {
+      this.drawGoldenAirdrop(ctx, extra.airdrop, elapsedSec);
+    }
+
     for (const dwDrop of extra.dualWieldDrops || []) {
       this.drawDualWieldDrop(ctx, dwDrop, elapsedSec);
+    }
+
+    for (const wDrop of extra.weaponDrops || []) {
+      this.drawWeaponDrop(ctx, wDrop, elapsedSec);
     }
 
     for (const b of barrels) {
@@ -290,9 +367,53 @@ export class ArenaRenderer {
       this.drawAirstrikeBeacon(ctx, strike, elapsedSec);
     }
 
+    // Dash Ghost Afterimages & Hologram Decoys
+    for (const ag of extra.afterimages || []) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(0.7, ag.alpha));
+      ctx.fillStyle = ag.color;
+      ctx.beginPath();
+      ctx.roundRect(ag.x - 12, ag.y - 24, 24, 48, 8);
+      ctx.fill();
+      ctx.restore();
+    }
+    for (const holo of extra.holograms || []) {
+      this.drawHologramClone(ctx, holo, elapsedSec);
+    }
+
+    // Grappling Hook Cables (drawn behind fighters)
+    for (const f of fighters) {
+      if (f.alive && f.grappleActive) {
+        ctx.save();
+        ctx.strokeStyle = '#94A3B8';
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(f.x, f.y - 6);
+        ctx.lineTo(f.grappleX, f.grappleY);
+        ctx.stroke();
+        ctx.fillStyle = '#22D3EE';
+        ctx.beginPath();
+        ctx.arc(f.grappleX, f.grappleY, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    const camViewerSlot = splitLabel === 'P2' ? 2 : 1;
+    const viewerFighter =
+      fighters.find((ft) => ft.isHuman && ft.playerIndex === camViewerSlot) ||
+      fighters.find((ft) => ft.isHuman);
+    const viewerNemesisSet = new Set(viewerFighter?.nemesisKillerIds || []);
+
     for (const f of fighters) {
       if (f.alive) {
-        this.drawFighter(ctx, f, elapsedSec, Boolean(extra.isTeamMode));
+        this.drawFighter(
+          ctx,
+          f,
+          elapsedSec,
+          Boolean(extra.isTeamMode),
+          viewerNemesisSet.has(f.id)
+        );
       }
     }
 
@@ -309,6 +430,14 @@ export class ArenaRenderer {
 
     for (const proj of projectiles) {
       this.drawProjectile(ctx, proj);
+    }
+
+    for (const cb of extra.cookerBombs || []) {
+      this.drawCookerBomb(ctx, cb, elapsedSec);
+    }
+
+    for (const bm of extra.geometryBeams || []) {
+      this.drawGeometryBeam(ctx, bm);
     }
 
     for (const gr of extra.grenades || []) {
@@ -335,7 +464,10 @@ export class ArenaRenderer {
       }
     }
 
-    // Comic Speech Bubbles & Floating Damage/Quip Texts
+    // Emote Popups, Comic Speech Bubbles & Floating Damage/Quip Texts
+    for (const em of extra.emotePopups || []) {
+      this.drawEmotePopup(ctx, em);
+    }
     for (const f of fighters) {
       if (f.alive && f.speechTimer > 0 && f.speechText) {
         this.drawSpeechBubble(ctx, f.x, f.y - 68, f.speechText, f.speechTimer);
@@ -358,6 +490,20 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
+    // Zero-Gravity Floating Dust Motes
+    if (extra.chaos?.phase === 'active' && extra.chaos.eventType === 'zero_gravity') {
+      ctx.save();
+      for (let i = 0; i < 34; i++) {
+        const mx = ((i * 197 + elapsedSec * 22) % map.width);
+        const my = ((i * 131 - elapsedSec * 36) % map.height + map.height) % map.height;
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(103, 232, 249, 0.55)' : 'rgba(250, 204, 21, 0.45)';
+        ctx.beginPath();
+        ctx.arc(mx, my, 2.2 + (i % 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     if (crosshair && crosshair.active) {
       this.drawCrosshair(
         ctx,
@@ -369,6 +515,11 @@ export class ArenaRenderer {
     }
 
     ctx.restore();
+
+    // City Blackout Darkness Lighting Pass
+    if (extra.chaos?.phase === 'active' && extra.chaos.eventType === 'blackout') {
+      this.drawBlackoutOverlay(ctx, vx, vy, vw, vh, cam, fighters, projectiles, extra);
+    }
 
     // Dynamic biome weather overlay
     this.drawWeatherEffects(ctx, vx, vy, vw, vh, cam, map, elapsedSec);
@@ -1034,7 +1185,12 @@ export class ArenaRenderer {
     ctx.restore();
   }
 
-  private drawPlatform(ctx: CanvasRenderingContext2D, p: PlatformRect, elapsedSec: number): void {
+  private drawPlatform(
+    ctx: CanvasRenderingContext2D,
+    p: PlatformRect,
+    elapsedSec: number,
+    crumbleWarn = false
+  ): void {
     ctx.save();
     if (p.style === 'grate') {
       ctx.fillStyle = '#334155';
@@ -1183,6 +1339,12 @@ export class ArenaRenderer {
       ctx.strokeStyle = '#0B101B';
       ctx.lineWidth = 2.5;
       ctx.strokeRect(p.x, p.y, p.w, p.h);
+    }
+    if (crumbleWarn) {
+      const pulse = 0.35 + Math.abs(Math.sin(elapsedSec * 9)) * 0.45;
+      ctx.strokeStyle = `rgba(239, 68, 68, ${pulse})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2);
     }
     ctx.restore();
   }
@@ -1599,6 +1761,45 @@ export class ArenaRenderer {
     ctx.restore();
   }
 
+  private drawWeaponDrop(
+    ctx: CanvasRenderingContext2D,
+    drop: WeaponDropEntity,
+    elapsedSec: number
+  ): void {
+    if (drop.life < 4 && Math.floor(elapsedSec * 12) % 2 === 0) {
+      return;
+    }
+    ctx.save();
+    const wDef = WEAPONS[drop.weaponId];
+    const bobY = drop.y + Math.sin(elapsedSec * 4.2 + drop.bobPhase) * 4;
+    const color = wDef?.bulletColor || '#22D3EE';
+    const label = (wDef?.shortName || drop.weaponId).toUpperCase();
+
+    ctx.fillStyle = `${color}2B`;
+    ctx.beginPath();
+    ctx.arc(drop.x, bobY, 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#0B101B';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.roundRect(drop.x - 20, bobY - 11, 40, 22, 5);
+    ctx.fill();
+    ctx.stroke();
+
+    // Stylized weapon silhouette
+    ctx.fillStyle = color;
+    ctx.fillRect(drop.x - 13, bobY - 3, 24, 5);
+    ctx.fillRect(drop.x - 6, bobY + 2, 5, 5);
+
+    ctx.font = '800 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = color;
+    ctx.fillText(label, drop.x, bobY - 16);
+    ctx.restore();
+  }
+
   private drawPowerUpDrop(
     ctx: CanvasRenderingContext2D,
     pu: PowerUpDropEntity,
@@ -1610,10 +1811,26 @@ export class ArenaRenderer {
 
     ctx.save();
     const bobY = pu.y + Math.sin(elapsedSec * 4.5 + pu.bobPhase) * 4;
-    const color =
-      pu.type === 'speed' ? '#FACC15' : pu.type === 'fuel_efficiency' ? '#2DD4BF' : '#38BDF8';
-    const label =
-      pu.type === 'speed' ? 'SPEED' : pu.type === 'fuel_efficiency' ? 'FUEL ECO' : 'SHIELD';
+    const colorMap: Record<string, string> = {
+      speed: '#FACC15',
+      fuel_efficiency: '#2DD4BF',
+      shield: '#38BDF8',
+      shrink: '#EC4899',
+      mega_size: '#F59E0B',
+      bubble_shield: '#A855F7',
+      holo_decoy: '#22D3EE',
+    };
+    const labelMap: Record<string, string> = {
+      speed: 'SPEED',
+      fuel_efficiency: 'FUEL ECO',
+      shield: 'SHIELD',
+      shrink: '? TINY',
+      mega_size: '? GIANT',
+      bubble_shield: '? BUBBLE',
+      holo_decoy: '? DECOY',
+    };
+    const color = colorMap[pu.type] || '#38BDF8';
+    const label = labelMap[pu.type] || 'BOOST';
 
     const pulse = 20 + Math.sin(elapsedSec * 6 + pu.bobPhase) * 3;
     ctx.fillStyle = `${color}30`;
@@ -1653,7 +1870,7 @@ export class ArenaRenderer {
       ctx.lineTo(-4, 5);
       ctx.quadraticCurveTo(-6, -1, 0, -8);
       ctx.fill();
-    } else {
+    } else if (pu.type === 'shield' || pu.type === 'bubble_shield') {
       ctx.beginPath();
       ctx.moveTo(0, -7.5);
       ctx.lineTo(6.5, -4.5);
@@ -1663,6 +1880,11 @@ export class ArenaRenderer {
       ctx.lineTo(-6.5, -4.5);
       ctx.closePath();
       ctx.fill();
+    } else {
+      ctx.font = '900 13px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', 0, 1);
     }
 
     ctx.font = '800 10px "JetBrains Mono", monospace';
@@ -1678,7 +1900,19 @@ export class ArenaRenderer {
     ctx.save();
     const x = b.x - b.w / 2;
     const y = b.y - b.h;
-    ctx.fillStyle = b.hitFlashTimer > 0 ? '#FEF08A' : '#DC2626';
+    if (b.launched) {
+      ctx.translate(b.x, b.y - b.h / 2);
+      ctx.rotate(Math.atan2(b.vy, b.vx) + Math.PI / 2);
+      ctx.fillStyle = '#F97316';
+      ctx.beginPath();
+      ctx.moveTo(-6, b.h / 2);
+      ctx.lineTo(6, b.h / 2);
+      ctx.lineTo(0, b.h / 2 + 16 + Math.random() * 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.translate(-b.x, -(b.y - b.h / 2));
+    }
+    ctx.fillStyle = b.hitFlashTimer > 0 ? '#FEF08A' : b.launched ? '#EA580C' : '#DC2626';
     ctx.fillRect(x, y, b.w, b.h);
     ctx.fillStyle = '#7F1D1D';
     ctx.fillRect(x, y + 6, b.w, 4);
@@ -1861,8 +2095,17 @@ export class ArenaRenderer {
 
   private getWeaponBodyColor(
     baseColor: string,
-    mastery: WeaponMasteryTier
-  ): { fill: string; trim?: string } {
+    mastery: WeaponMasteryTier,
+    gunWrap?: GunWrapId
+  ): { fill: string; trim?: string; accent?: string } {
+    if (gunWrap && gunWrap !== 'none') {
+      if (gunWrap === 'carbon_fiber') return { fill: '#18181B', trim: '#52525B', accent: '#A1A1AA' };
+      if (gunWrap === 'lava_magma') return { fill: '#450A0A', trim: '#F97316', accent: '#FACC15' };
+      if (gunWrap === 'electric_ice') return { fill: '#0C4A6E', trim: '#38BDF8', accent: '#E0F2FE' };
+      if (gunWrap === 'comic_halftone') return { fill: '#FACC15', trim: '#EC4899', accent: '#0F172A' };
+      if (gunWrap === 'royal_gold') return { fill: '#D97706', trim: '#FDE047', accent: '#10B981' };
+      if (gunWrap === 'galaxy_void') return { fill: '#3B0764', trim: '#C084FC', accent: '#38BDF8' };
+    }
     if (mastery === 'camo') return { fill: '#4D7C0F', trim: '#365314' };
     if (mastery === 'gold') return { fill: '#FACC15', trim: '#A16207' };
     if (mastery === 'diamond') return { fill: '#67E8F9', trim: '#FFFFFF' };
@@ -1927,27 +2170,91 @@ export class ArenaRenderer {
     }
 
     if (f.ultActiveTimer > 0) {
-      if (f.characterId === 'yogi_boy') {
-        ctx.strokeStyle = 'rgba(249, 115, 22, 0.88)';
-        ctx.fillStyle = 'rgba(249, 115, 22, 0.16)';
-        ctx.lineWidth = 3;
+      if (f.characterId === 'baba_wifi') {
+        // Glowing Hexagonal Cyber-Dome Shield
+        ctx.save();
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.92)';
+        ctx.fillStyle = 'rgba(34, 211, 238, 0.14)';
+        ctx.lineWidth = 2.6;
         ctx.beginPath();
-        ctx.arc(cx, f.y - 4, 34, 0, Math.PI * 2);
+        const hexR = 37 + Math.sin(elapsedSec * 9) * 1.5;
+        for (let i = 0; i < 6; i++) {
+          const ang = (i * Math.PI) / 3 + elapsedSec * 0.7;
+          const hx = cx + Math.cos(ang) * hexR;
+          const hy = f.y - 4 + Math.sin(ang) * hexR;
+          if (i === 0) ctx.moveTo(hx, hy);
+          else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
-      } else if (f.characterId === 'revolutionary') {
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
-        ctx.lineWidth = 2.2;
+        ctx.restore();
+      } else if (f.characterId === 'captain_jalebi') {
+        const rb = ['#EF4444', '#FACC15', '#22C55E', '#38BDF8', '#A855F7'];
+        const col = rb[Math.floor(elapsedSec * 12) % rb.length];
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.8;
         ctx.beginPath();
-        ctx.arc(cx - f.vx * 0.04, f.y - 2, 26, 0, Math.PI * 2);
+        ctx.arc(cx - f.vx * 0.04, f.y - 2, 27, 0, Math.PI * 2);
         ctx.stroke();
-      } else if (f.characterId === 'iron_bear') {
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
-        ctx.lineWidth = 2.5;
+      } else if (f.characterId === 'agent_404') {
+        ctx.strokeStyle = 'rgba(74, 222, 128, 0.88)';
+        ctx.lineWidth = 2.4;
+        ctx.setLineDash([4, 3]);
         ctx.beginPath();
-        ctx.arc(cx, f.y - 4, 30 + Math.sin(elapsedSec * 14) * 2, 0, Math.PI * 2);
+        ctx.arc(cx, f.y - 4, 30 + Math.sin(elapsedSec * 16) * 2, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (f.characterId === 'aunty_cctv') {
+        ctx.strokeStyle = 'rgba(244, 114, 182, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, f.y - 16, 26 + (elapsedSec * 24) % 14, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (f.characterId === 'baron_voltage') {
+        const pulseR = 32 + ((0.75 - Math.min(0.75, f.ultActiveTimer)) / 0.75) * 260;
+        ctx.save();
+        ctx.strokeStyle = '#22D3EE';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        for (let i = 0; i <= 16; i++) {
+          const ang = (i / 16) * Math.PI * 2;
+          const jitter = i % 2 === 0 ? 7 : -7;
+          const rx = cx + Math.cos(ang) * (pulseR + jitter);
+          const ry = f.y + Math.sin(ang) * (pulseR + jitter);
+          if (i === 0) ctx.moveTo(rx, ry);
+          else ctx.lineTo(rx, ry);
+        }
+        ctx.stroke();
+        ctx.restore();
       }
+    }
+
+    if (f.freezeTimer > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(125, 211, 252, 0.22)';
+      ctx.strokeStyle = '#38BDF8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(cx - 16, f.y - 28, 32, 54, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (f.empDisableTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = Math.floor(elapsedSec * 20) % 2 === 0 ? '#22D3EE' : '#FACC15';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 14, f.y - 14);
+      ctx.lineTo(cx - 4, f.y - 4);
+      ctx.lineTo(cx - 12, f.y + 8);
+      ctx.moveTo(cx + 14, f.y - 12);
+      ctx.lineTo(cx + 5, f.y);
+      ctx.lineTo(cx + 13, f.y + 10);
+      ctx.stroke();
+      ctx.restore();
     }
 
     if (f.speedBuffTimer > 0) {
@@ -2009,27 +2316,54 @@ export class ArenaRenderer {
     }
 
     const legSwing = f.grounded ? Math.sin(f.walkCycle) * 7 : 4;
-    ctx.strokeStyle =
-      f.characterId === 'revolutionary'
-        ? '#1D4ED8'
-        : f.characterId === 'yogi_boy'
-        ? '#C2410C'
-        : f.characterId === 'thongi_baba'
-        ? '#3B3B8F'
-        : '#0B101B';
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(cx - 4, footY - 13);
-    ctx.lineTo(cx - 4 + legSwing, footY - 1);
-    ctx.moveTo(cx + 4, footY - 13);
-    ctx.lineTo(cx + 4 - legSwing, footY - 1);
-    ctx.stroke();
+    if (f.characterId === 'baba_wifi') {
+      // Levitating cyber sandals & subtle hover bob
+      ctx.strokeStyle = '#EA580C';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 4, footY - 13);
+      ctx.lineTo(cx - 4 + legSwing * 0.6, footY - 4);
+      ctx.moveTo(cx + 4, footY - 13);
+      ctx.lineTo(cx + 4 - legSwing * 0.6, footY - 4);
+      ctx.stroke();
+      ctx.fillStyle = '#22D3EE';
+      ctx.fillRect(cx - 8 + legSwing * 0.6, footY - 4, 7, 3);
+      ctx.fillRect(cx + 1 - legSwing * 0.6, footY - 4, 7, 3);
+    } else {
+      ctx.strokeStyle =
+        f.characterId === 'captain_jalebi'
+          ? '#0F172A'
+          : f.characterId === 'chappal_ninja'
+          ? '#065F46'
+          : f.characterId === 'thongi_baba'
+          ? '#3B3B8F'
+          : f.characterId === 'aunty_cctv'
+          ? '#9D174D'
+          : '#0B101B';
+      ctx.lineWidth = f.characterId === 'bhaijaan_gymbro' ? 4 : 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - 4, footY - 13);
+      ctx.lineTo(cx - 4 + legSwing, footY - 1);
+      ctx.moveTo(cx + 4, footY - 13);
+      ctx.lineTo(cx + 4 - legSwing, footY - 1);
+      ctx.stroke();
+
+      if (f.characterId === 'captain_jalebi') {
+        // Neon glowing sneakers
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillRect(cx - 8 + legSwing, footY - 3, 8, 3.5);
+        ctx.fillStyle = '#FACC15';
+        ctx.fillRect(cx - legSwing, footY - 3, 8, 3.5);
+      }
+    }
 
     ctx.fillStyle = f.hitFlashTimer > 0 ? '#FFFFFF' : suitColor;
     ctx.strokeStyle = '#0B101B';
     ctx.lineWidth = 2.2;
-    if (f.characterId === 'mitron') {
+    if (f.characterId === 'chai_storm') {
+      // Cream shirt + knitted sleeveless sweater-vest + belt steel chai tumbler
       ctx.fillStyle = f.hitFlashTimer > 0 ? '#FFFFFF' : '#FEF3C7';
       ctx.beginPath();
       ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 23, 5);
@@ -2037,62 +2371,201 @@ export class ArenaRenderer {
       ctx.stroke();
       if (f.hitFlashTimer <= 0) {
         ctx.fillStyle = suitColor;
-        ctx.fillRect(cx - 10, bodyCenterY - 12, 7, 21);
-        ctx.fillRect(cx + 3, bodyCenterY - 12, 7, 21);
-      }
-    } else if (f.characterId === 'tariff_boss' || f.characterId === 'dashing_trudeau') {
-      ctx.beginPath();
-      ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 22, 5);
-      ctx.fill();
-      ctx.stroke();
-      if (f.hitFlashTimer <= 0) {
-        ctx.fillStyle = '#F8FAFC';
+        ctx.fillRect(cx - 9, bodyCenterY - 11, 18, 18);
+        ctx.fillStyle = '#FEF3C7';
         ctx.beginPath();
         ctx.moveTo(cx - 4, bodyCenterY - 12);
         ctx.lineTo(cx + 4, bodyCenterY - 12);
-        ctx.lineTo(cx + f.facing * 2, bodyCenterY - 2);
+        ctx.lineTo(cx, bodyCenterY - 5);
         ctx.closePath();
         ctx.fill();
-
-        ctx.fillStyle = tieColor;
-        const tieLen = f.characterId === 'tariff_boss' ? 15 : 6;
-        ctx.beginPath();
-        ctx.moveTo(cx + f.facing * 2 - 2.5, bodyCenterY - 11);
-        ctx.lineTo(cx + f.facing * 2 + 2.5, bodyCenterY - 11);
-        ctx.lineTo(cx + f.facing * 3, bodyCenterY + tieLen);
-        ctx.lineTo(cx + f.facing * 2 - 2, bodyCenterY + tieLen - 2);
-        ctx.closePath();
-        ctx.fill();
+        // Steel chai tumbler on hip
+        ctx.fillStyle = '#CBD5E1';
+        ctx.fillRect(cx - f.facing * 12, bodyCenterY + 2, 5, 7);
+        ctx.strokeRect(cx - f.facing * 12, bodyCenterY + 2, 5, 7);
       }
-    } else if (f.characterId === 'revolutionary') {
+    } else if (f.characterId === 'baron_voltage') {
+      // Tattered crimson-and-charcoal cloak + circuit trim + gauntlet coils
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#450A0A';
+        ctx.beginPath();
+        ctx.moveTo(cx - f.facing * 6, bodyCenterY - 11);
+        ctx.lineTo(cx - f.facing * 17, bodyCenterY + 12);
+        ctx.lineTo(cx - f.facing * 8, bodyCenterY + 14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.fillStyle = f.hitFlashTimer > 0 ? '#FFFFFF' : customOutfit ? suitColor : '#1E293B';
+      ctx.beginPath();
+      ctx.roundRect(cx - 11, bodyCenterY - 12, 22, 23, 4);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        // Cyan circuit-board chest trim + brass arc core
+        ctx.strokeStyle = '#22D3EE';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(cx - 8, bodyCenterY - 7);
+        ctx.lineTo(cx - 3, bodyCenterY - 2);
+        ctx.lineTo(cx + 3, bodyCenterY - 2);
+        ctx.lineTo(cx + 8, bodyCenterY - 7);
+        ctx.stroke();
+        ctx.fillStyle = '#D97706';
+        ctx.beginPath();
+        ctx.arc(cx, bodyCenterY + 3, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#22D3EE';
+        ctx.beginPath();
+        ctx.arc(cx, bodyCenterY + 3, 2, 0, Math.PI * 2);
+        ctx.fill();
+        // Electric gauntlet coils
+        ctx.fillStyle = '#38BDF8';
+        ctx.fillRect(cx + f.facing * 8, bodyCenterY - 2, 5, 4);
+      }
+    } else if (f.characterId === 'captain_jalebi') {
+      // White track jacket + swirling pretzel cape
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#EA580C';
+        ctx.beginPath();
+        ctx.moveTo(cx - f.facing * 6, bodyCenterY - 10);
+        ctx.lineTo(cx - f.facing * 19, bodyCenterY + 8);
+        ctx.lineTo(cx - f.facing * 9, bodyCenterY + 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
       ctx.fillStyle = f.hitFlashTimer > 0 ? '#FFFFFF' : customOutfit ? suitColor : '#F8FAFC';
       ctx.beginPath();
       ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 22, 5);
       ctx.fill();
       ctx.stroke();
-    } else if (f.characterId === 'yogi_boy') {
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#F97316';
+        ctx.fillRect(cx - 10, bodyCenterY - 4, 20, 4);
+      }
+    } else if (f.characterId === 'baba_wifi') {
+      // Neon orange robes + glowing cyan chest symbol
       ctx.beginPath();
       ctx.roundRect(cx - 11, bodyCenterY - 12, 22, 24, 5);
       ctx.fill();
       ctx.stroke();
       if (f.hitFlashTimer <= 0) {
-        ctx.strokeStyle = '#FDBA74';
-        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = '#22D3EE';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(cx - 8, bodyCenterY - 10);
-        ctx.lineTo(cx + 8, bodyCenterY + 8);
+        ctx.arc(cx, bodyCenterY, 5, -Math.PI * 0.8, -Math.PI * 0.2);
         ctx.stroke();
       }
-    } else if (f.characterId === 'red_dragon') {
+    } else if (f.characterId === 'general_noodle') {
+      // Puffy parka + two hovering paper-lantern drones
+      ctx.beginPath();
+      ctx.roundRect(cx - 12, bodyCenterY - 12, 24, 23, 7);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.strokeStyle = '#0B101B';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(cx - 11, bodyCenterY - 3);
+        ctx.lineTo(cx + 11, bodyCenterY - 3);
+        ctx.moveTo(cx - 11, bodyCenterY + 4);
+        ctx.lineTo(cx + 11, bodyCenterY + 4);
+        ctx.stroke();
+        // Hovering mini paper-lantern drones
+        const bob = Math.sin(elapsedSec * 7) * 3;
+        ctx.fillStyle = '#EF4444';
+        ctx.fillRect(cx - 19, bodyCenterY - 26 + bob, 6, 8);
+        ctx.strokeRect(cx - 19, bodyCenterY - 26 + bob, 6, 8);
+        ctx.fillRect(cx + 13, bodyCenterY - 26 - bob, 6, 8);
+        ctx.strokeRect(cx + 13, bodyCenterY - 26 - bob, 6, 8);
+      }
+    } else if (f.characterId === 'agent_404') {
+      // Spy trench coat + glowing green matrix badge
+      ctx.beginPath();
+      ctx.roundRect(cx - 11, bodyCenterY - 12, 22, 24, 4);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#22C55E';
+        ctx.fillRect(cx + f.facing * 4, bodyCenterY - 6, 4, 4);
+      }
+    } else if (f.characterId === 'prof_jugaad') {
+      // Duct-taped lab coat + soda bottle pack
+      ctx.beginPath();
+      ctx.roundRect(cx - 11, bodyCenterY - 12, 22, 23, 5);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#94A3B8';
+        ctx.fillRect(cx - 8, bodyCenterY - 3, 10, 4);
+        ctx.fillStyle = '#FACC15';
+        ctx.fillRect(cx - f.facing * 15, bodyCenterY - 9, 5, 11);
+      }
+    } else if (f.characterId === 'chappal_ninja') {
+      // Tactical ninja gi + golden chappal on belt
+      ctx.beginPath();
+      ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 22, 4);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#FACC15';
+        ctx.fillRect(cx - 10, bodyCenterY + 3, 20, 3);
+        ctx.fillRect(cx - f.facing * 12, bodyCenterY + 1, 5, 8);
+      }
+    } else if (f.characterId === 'dj_dholak') {
+      // Glittering disco waistcoat + strapped chest dholak drum
       ctx.beginPath();
       ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 22, 5);
       ctx.fill();
       ctx.stroke();
       if (f.hitFlashTimer <= 0) {
-        ctx.fillStyle = '#DC2626';
+        ctx.fillStyle = '#D97706';
+        ctx.fillRect(cx - 7, bodyCenterY - 2, 14, 9);
+        ctx.strokeRect(cx - 7, bodyCenterY - 2, 14, 9);
+        ctx.fillStyle = '#FEF3C7';
+        ctx.fillRect(cx - 9, bodyCenterY - 2, 3, 9);
+        ctx.fillRect(cx + 6, bodyCenterY - 2, 3, 9);
+      }
+    } else if (f.characterId === 'aunty_cctv') {
+      // Floral cardigan + neck binoculars
+      ctx.beginPath();
+      ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 23, 6);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#F472B6';
         ctx.beginPath();
-        ctx.arc(cx + f.facing * 5, bodyCenterY - 5, 2.3, 0, Math.PI * 2);
+        ctx.arc(cx - 4, bodyCenterY - 4, 2, 0, Math.PI * 2);
+        ctx.arc(cx + 4, bodyCenterY + 3, 2, 0, Math.PI * 2);
         ctx.fill();
+        ctx.fillStyle = '#0F172A';
+        ctx.fillRect(cx + f.facing * 2 - 4, bodyCenterY - 11, 8, 5);
+      }
+    } else if (f.characterId === 'bhaijaan_gymbro') {
+      // Huge wide upper-body stringer tank
+      ctx.beginPath();
+      ctx.roundRect(cx - 14, bodyCenterY - 14, 28, 22, 6);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = charDef.skinTone;
+        ctx.fillRect(cx - 16, bodyCenterY - 12, 5, 9);
+        ctx.fillRect(cx + 11, bodyCenterY - 12, 5, 9);
+      }
+    } else if (f.characterId === 'exam_topper') {
+      // Navy blazer + gold medal + ruler on back
+      ctx.beginPath();
+      ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 22, 4);
+      ctx.fill();
+      ctx.stroke();
+      if (f.hitFlashTimer <= 0) {
+        ctx.fillStyle = '#FACC15';
+        ctx.beginPath();
+        ctx.arc(cx + f.facing * 4, bodyCenterY - 3, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#F59E0B';
+        ctx.fillRect(cx - f.facing * 13, bodyCenterY - 16, 3, 20);
       }
     } else if (f.characterId === 'thongi_baba') {
       // Blocky Minecraft Steve cyan shirt
@@ -2102,16 +2575,16 @@ export class ArenaRenderer {
         ctx.fillStyle = charDef.skinTone;
         ctx.fillRect(cx - 4, bodyCenterY - 12, 8, 4);
       }
-    } else {
-      ctx.beginPath();
-      ctx.roundRect(cx - 10, bodyCenterY - 12, 20, 22, 5);
-      ctx.fill();
-      ctx.stroke();
-      if (f.hitFlashTimer <= 0) {
-        ctx.fillStyle = tieColor;
-        ctx.fillRect(cx - 7, bodyCenterY - 8, 6, 5);
-        ctx.fillRect(cx + 1, bodyCenterY - 2, 7, 5);
-      }
+    }
+
+    if (f.outfitId === 'neon_cyber' && f.hitFlashTimer <= 0) {
+      ctx.save();
+      ctx.strokeStyle = '#22D3EE';
+      ctx.lineWidth = 1.8;
+      ctx.strokeRect(cx - 9, bodyCenterY - 10, 18, 18);
+      ctx.fillStyle = '#22D3EE';
+      ctx.fillRect(cx - 4, bodyCenterY - 2, 8, 2.5);
+      ctx.restore();
     }
 
     const headY = bodyCenterY - 23;
@@ -2133,14 +2606,12 @@ export class ArenaRenderer {
       ctx.stroke();
 
       if (f.hitFlashTimer <= 0) {
-        // Sigma jawline & cheekbone shadow
         ctx.strokeStyle = '#6B3D1C';
         ctx.lineWidth = 1.6;
         ctx.beginPath();
         ctx.moveTo(cx + f.facing * 2, headY + 5);
         ctx.lineTo(cx + f.facing * 9, headY + 12);
         ctx.stroke();
-        // Pixel Steve goatee
         ctx.fillStyle = '#4A2E1B';
         ctx.fillRect(cx + f.facing * 3 - 4, headY + 8, 9, 5);
       }
@@ -2154,28 +2625,63 @@ export class ArenaRenderer {
     if (f.hitFlashTimer <= 0) {
       const eyeBaseX = cx + f.facing * 4.5;
 
-      if (f.characterId === 'mitron') {
-        ctx.fillStyle = '#F8FAFC';
-        ctx.strokeStyle = '#CBD5E1';
-        ctx.lineWidth = 1.2;
+      // Eyewear & Facial Extras
+      if (f.characterId === 'baba_wifi') {
+        // Futuristic VR Visor + floating antenna
+        ctx.fillStyle = '#06B6D4';
+        ctx.strokeStyle = '#0B101B';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(eyeBaseX - 7, headY - 5, 14, 6);
+        ctx.strokeRect(eyeBaseX - 7, headY - 5, 14, 6);
+        ctx.strokeStyle = '#22D3EE';
         ctx.beginPath();
-        ctx.arc(cx + f.facing * 1.5, headY + 3, 12.5, 0.15, Math.PI - 0.15);
+        ctx.moveTo(cx, headY - 14);
+        ctx.lineTo(cx, headY - 22);
+        ctx.stroke();
+        ctx.fillStyle = '#FACC15';
+        ctx.beginPath();
+        ctx.arc(cx, headY - 23, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (f.characterId === 'agent_404') {
+        // Green NVG Goggles
+        ctx.fillStyle = '#09090B';
+        ctx.fillRect(eyeBaseX - 7, headY - 5, 14, 6);
+        ctx.fillStyle = '#22C55E';
+        ctx.beginPath();
+        ctx.arc(eyeBaseX - 3, headY - 2, 2.3, 0, Math.PI * 2);
+        ctx.arc(eyeBaseX + 4, headY - 2, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (f.characterId === 'dj_dholak') {
+        // Neon Shutter Shades
+        ctx.fillStyle = '#EC4899';
+        ctx.fillRect(eyeBaseX - 7, headY - 5, 14, 5.5);
+        ctx.strokeStyle = '#22D3EE';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(eyeBaseX - 7, headY - 2.5);
+        ctx.lineTo(eyeBaseX + 7, headY - 2.5);
+        ctx.stroke();
+      } else if (f.characterId === 'baron_voltage') {
+        // Cobalt-and-brass riveted iron faceplate + glowing cyan eye slits
+        ctx.fillStyle = '#1E3A8A';
+        ctx.strokeStyle = '#D97706';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(cx, headY, headR - 0.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-      }
-
-      if (f.characterId === 'revolutionary') {
-        ctx.fillStyle = 'rgba(51, 65, 85, 0.55)';
-        ctx.fillRect(cx + f.facing * 2 - 4, headY + 7, 2, 2);
-        ctx.fillRect(cx + f.facing * 2, headY + 9, 2, 2);
-        ctx.fillRect(cx + f.facing * 2 + 4, headY + 7, 2, 2);
-      }
-
-      if (f.characterId === 'iron_bear') {
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillRect(eyeBaseX - 6, headY - 4, 4.5, 2.8);
+        ctx.fillRect(eyeBaseX + 2, headY - 4, 4.5, 2.8);
+        // Brass nose ridge & rivets
+        ctx.fillStyle = '#D97706';
+        ctx.fillRect(eyeBaseX - 0.5, headY - 6, 2, 10);
+        ctx.fillRect(cx - 9, headY + 4, 2, 2);
+        ctx.fillRect(cx + 7, headY + 4, 2, 2);
+      } else if (f.characterId === 'bhaijaan_gymbro') {
+        // Cool dark shades
         ctx.fillStyle = '#09090B';
-        ctx.fillRect(eyeBaseX - 6, headY - 4, 13, 5);
-        ctx.fillStyle = '#94A3B8';
-        ctx.fillRect(eyeBaseX - 4, headY - 3, 3, 1.5);
+        ctx.fillRect(eyeBaseX - 6.5, headY - 4.5, 13, 5);
       } else if (f.characterId === 'thongi_baba') {
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(eyeBaseX - 6, headY - 4, 5.5, 3);
@@ -2204,23 +2710,34 @@ export class ArenaRenderer {
         ctx.arc(eyeBaseX + 4.7 + f.facing * 0.8, headY - 2, 1.5, 0, Math.PI * 2);
         ctx.fill();
 
-        if (f.characterId === 'mitron') {
-          ctx.strokeStyle = '#E2E8F0';
-          ctx.lineWidth = 1.3;
-          ctx.strokeRect(eyeBaseX - 6, headY - 5, 6, 5.5);
-          ctx.strokeRect(eyeBaseX + 1, headY - 5, 6, 5.5);
+        if (f.characterId === 'chai_storm' || f.characterId === 'exam_topper') {
+          ctx.strokeStyle = '#1E293B';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(eyeBaseX - 3, headY - 2, 4.2, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(eyeBaseX + 4, headY - 2, 4.2, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (f.characterId === 'prof_jugaad') {
+          ctx.strokeStyle = '#38BDF8';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(eyeBaseX - 6.5, headY - 5.5, 6, 6);
+          ctx.strokeRect(eyeBaseX + 0.5, headY - 5.5, 6, 6);
         }
       }
 
-      if (f.characterId === 'dashing_trudeau') {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#7C2D12';
-        ctx.lineWidth = 1.4;
+      // Mustaches & Mouths
+      if (f.characterId === 'chai_storm') {
+        // Wild Handlebar Mustache
+        ctx.fillStyle = '#F8FAFC';
+        ctx.strokeStyle = '#0B101B';
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        ctx.arc(cx + f.facing * 3.5, headY + 4.5, 4.5, 0, Math.PI);
+        ctx.ellipse(cx + f.facing * 4, headY + 4, 8, 3, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-      } else if (f.characterId !== 'mitron') {
+      } else if (f.characterId !== 'chappal_ninja') {
         ctx.strokeStyle = '#7C2D12';
         ctx.lineWidth = 1.8;
         ctx.beginPath();
@@ -2229,50 +2746,101 @@ export class ArenaRenderer {
         ctx.stroke();
       }
 
+      // Headgear & Hair Styles
       ctx.fillStyle = charDef.hairColor;
       ctx.strokeStyle = '#0B101B';
       ctx.lineWidth = 1.8;
-      if (charDef.hairStyle === 'swept_white') {
+      if (charDef.hairStyle === 'chai_specs') {
         ctx.beginPath();
-        ctx.moveTo(cx - 12, headY - 7);
-        ctx.quadraticCurveTo(cx, headY - 19, cx + f.facing * 13, headY - 8);
-        ctx.quadraticCurveTo(cx, headY - 11, cx - 12, headY - 7);
+        ctx.arc(cx, headY - 5, 13.5, Math.PI * 0.9, Math.PI * 2.1);
         ctx.fill();
         ctx.stroke();
-      } else if (charDef.hairStyle === 'swept_blonde') {
+      } else if (charDef.hairStyle === 'voltage_mask') {
+        // Crimson tattered hood + brass side fins
+        ctx.fillStyle = '#7F1D1D';
         ctx.beginPath();
-        ctx.moveTo(cx - 13, headY - 6);
-        ctx.quadraticCurveTo(cx + f.facing * 15, headY - 25, cx + f.facing * 16, headY - 8);
-        ctx.quadraticCurveTo(cx, headY - 12, cx - 13, headY - 6);
+        ctx.arc(cx, headY - 2, 15.5, Math.PI * 0.85, Math.PI * 2.15);
         ctx.fill();
         ctx.stroke();
-      } else if (charDef.hairStyle === 'short_stubble') {
+        ctx.fillStyle = '#D97706';
+        ctx.fillRect(cx - 15, headY - 6, 4, 8);
+        ctx.fillRect(cx + 11, headY - 6, 4, 8);
+      } else if (charDef.hairStyle === 'jalebi_band') {
         ctx.beginPath();
         ctx.arc(cx, headY - 4, 13.5, Math.PI * 0.95, Math.PI * 2.05);
         ctx.fill();
         ctx.stroke();
-      } else if (charDef.hairStyle === 'shaved_tilak') {
         ctx.fillStyle = '#F97316';
-        ctx.fillRect(cx + f.facing * 4 - 1.5, headY - 11, 3, 6.5);
-        ctx.fillStyle = '#DC2626';
+        ctx.fillRect(cx - 14, headY - 10, 28, 4.5);
+        ctx.strokeRect(cx - 14, headY - 10, 28, 4.5);
+      } else if (charDef.hairStyle === 'wifi_visor') {
         ctx.beginPath();
-        ctx.arc(cx + f.facing * 4, headY - 9, 1.3, 0, Math.PI * 2);
+        ctx.arc(cx, headY - 4, 13.5, Math.PI * 0.95, Math.PI * 2.05);
         ctx.fill();
-      } else if (charDef.hairStyle === 'mao_part') {
+        ctx.stroke();
+      } else if (charDef.hairStyle === 'bowl_drones') {
+        ctx.beginPath();
+        ctx.arc(cx, headY - 4, 14.5, Math.PI * 0.95, Math.PI * 2.05);
+        ctx.fill();
+        ctx.stroke();
+      } else if (charDef.hairStyle === 'spy_fedora') {
+        ctx.fillStyle = '#1E293B';
+        ctx.fillRect(cx - 16, headY - 11, 32, 3.5);
+        ctx.fillRect(cx - 10, headY - 20, 20, 9);
+        ctx.strokeRect(cx - 10, headY - 20, 20, 9);
+      } else if (charDef.hairStyle === 'einstein_goggles') {
+        ctx.beginPath();
+        ctx.arc(cx - 8, headY - 11, 7, 0, Math.PI * 2);
+        ctx.arc(cx + 8, headY - 11, 7, 0, Math.PI * 2);
+        ctx.arc(cx, headY - 15, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (charDef.hairStyle === 'bun_hairpin') {
+        ctx.fillStyle = '#0F172A';
+        ctx.beginPath();
+        ctx.arc(cx, headY, headR + 0.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = charDef.skinTone;
+        ctx.fillRect(eyeBaseX - 7, headY - 5, 14, 6);
+        ctx.fillStyle = '#FACC15';
+        ctx.fillRect(cx - 14, headY - 10, 28, 3.5);
+      } else if (charDef.hairStyle === 'dj_shades') {
+        ctx.beginPath();
+        ctx.arc(cx, headY - 5, 14, Math.PI * 0.9, Math.PI * 2.1);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#22D3EE';
+        ctx.beginPath();
+        ctx.arc(cx - 13, headY - 1, 5, 0, Math.PI * 2);
+        ctx.arc(cx + 13, headY - 1, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (charDef.hairStyle === 'aunty_dish') {
+        ctx.beginPath();
+        ctx.arc(cx, headY - 5, 13.5, Math.PI * 0.95, Math.PI * 2.05);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx - f.facing * 9, headY - 13, 6.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // Tiny satellite dish on bun
+        ctx.strokeStyle = '#F472B6';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(cx - f.facing * 9, headY - 19);
+        ctx.lineTo(cx - f.facing * 9, headY - 25);
+        ctx.stroke();
+      } else if (charDef.hairStyle === 'gym_sweatband') {
+        ctx.beginPath();
+        ctx.ellipse(cx + f.facing * 3, headY - 13, 12, 6, -0.2 * f.facing, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#EF4444';
+        ctx.fillRect(cx - 14, headY - 10, 28, 4);
+      } else if (charDef.hairStyle === 'topper_swirl') {
         ctx.beginPath();
         ctx.arc(cx, headY - 4, 13.5, Math.PI * 0.9, Math.PI * 2.1);
-        ctx.fill();
-        ctx.stroke();
-      } else if (charDef.hairStyle === 'receding_blonde') {
-        ctx.beginPath();
-        ctx.ellipse(cx - f.facing * 2, headY - 12, 11, 4, -0.1 * f.facing, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      } else if (charDef.hairStyle === 'wavy_curls') {
-        ctx.beginPath();
-        ctx.arc(cx - 5, headY - 12, 7.5, 0, Math.PI * 2);
-        ctx.arc(cx + 4, headY - 13, 7.5, 0, Math.PI * 2);
-        ctx.arc(cx + f.facing * 8, headY - 8, 5, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       } else if (charDef.hairStyle === 'steve_sigma') {
@@ -2281,6 +2849,29 @@ export class ArenaRenderer {
         ctx.strokeRect(cx - 14.5, headY - 15, 29, 6.5);
         ctx.fillRect(cx - f.facing * 14.5 - (f.facing > 0 ? 0 : 6), headY - 9, 6, 6);
       }
+    }
+
+    // Stun stars & Dance music notes above head
+    if (f.stunTimer > 0) {
+      ctx.save();
+      ctx.fillStyle = '#FACC15';
+      for (let i = 0; i < 3; i++) {
+        const ang = elapsedSec * 6 + (i * Math.PI * 2) / 3;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * 14, headY - 20 + Math.sin(ang) * 4, 2.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    if (f.danceTimer > 0) {
+      ctx.save();
+      ctx.fillStyle = '#EC4899';
+      ctx.font = '800 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('♪', cx - 12, headY - 18 + Math.sin(elapsedSec * 12) * 4);
+      ctx.fillStyle = '#22D3EE';
+      ctx.fillText('♫', cx + 12, headY - 22 - Math.sin(elapsedSec * 12) * 4);
+      ctx.restore();
     }
 
     // Melee Swing / Held Melee Slot / Rotating Firearm
@@ -2326,14 +2917,85 @@ export class ArenaRenderer {
         ctx.fillRect(4 - kick * 0.7, 3, dwLen, 5);
         ctx.strokeRect(4 - kick * 0.7, 3, dwLen, 5);
       } else if (f.weaponId === 'bomberier') {
-        const skin = this.getWeaponBodyColor('#3F6212', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#3F6212', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = skin.fill;
         ctx.fillRect(-8 - kick, -5, weapon.length, 10);
         ctx.strokeRect(-8 - kick, -5, weapon.length, 10);
-        ctx.fillStyle = '#EF4444';
+        ctx.fillStyle = skin.trim || '#EF4444';
         ctx.fillRect(weapon.length - 10 - kick, -6, 7, 12);
+      } else if (f.weaponId === 'minigun') {
+        const skin = this.getWeaponBodyColor('#334155', f.weaponMastery, f.gunWrap);
+        // Ammo drum + top handle + rotating 4-barrel cluster
+        ctx.fillStyle = '#0F172A';
+        ctx.fillRect(2 - kick, 1, 12, 9);
+        ctx.strokeRect(2 - kick, 1, 12, 9);
+        ctx.fillStyle = skin.fill;
+        ctx.fillRect(0 - kick, -6, 18, 9);
+        ctx.strokeRect(0 - kick, -6, 18, 9);
+        ctx.strokeStyle = skin.trim || '#94A3B8';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(4 - kick, -10, 10, 4);
+        const spinJitter = f.minigunSpinTimer > 0.05 ? Math.sin(elapsedSec * 42) * 1.6 : 0;
+        ctx.strokeStyle = '#0B101B';
+        ctx.lineWidth = 1.4;
+        ctx.fillStyle = skin.trim || '#94A3B8';
+        for (const by of [-4.5, -1.5, 1.5]) {
+          ctx.fillRect(18 - kick, by + spinJitter * 0.4, weapon.length - 16, 2.4);
+          ctx.strokeRect(18 - kick, by + spinJitter * 0.4, weapon.length - 16, 2.4);
+        }
+        ctx.fillStyle = skin.accent || '#F59E0B';
+        ctx.fillRect(weapon.length - 6 - kick, -5, 4, 9);
+      } else if (f.weaponId === 'plasma_repeater') {
+        const skin = this.getWeaponBodyColor('#0F172A', f.weaponMastery, f.gunWrap);
+        ctx.fillStyle = skin.fill;
+        ctx.fillRect(4 - kick, -4, weapon.length, 7);
+        ctx.strokeRect(4 - kick, -4, weapon.length, 7);
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillRect(12 - kick, -2, weapon.length - 12, 2.6);
+        ctx.fillStyle = skin.trim || '#38BDF8';
+        ctx.fillRect(weapon.length - 2 - kick, -5, 4, 9);
+      } else if (f.weaponId === 'freeze_ray') {
+        const skin = this.getWeaponBodyColor('#1E3A8A', f.weaponMastery, f.gunWrap);
+        ctx.fillStyle = skin.fill;
+        ctx.fillRect(4 - kick, -4, weapon.length - 4, 7);
+        ctx.strokeRect(4 - kick, -4, weapon.length - 4, 7);
+        // Cryo tank
+        ctx.fillStyle = '#7DD3FC';
+        ctx.fillRect(10 - kick, -8, 12, 4);
+        ctx.strokeRect(10 - kick, -8, 12, 4);
+        // Frost emitter bell
+        ctx.fillStyle = '#E0F2FE';
+        ctx.fillRect(weapon.length - 4 - kick, -5.5, 5, 10);
+        ctx.strokeRect(weapon.length - 4 - kick, -5.5, 5, 10);
+      } else if (f.weaponId === 'crossbow_launcher') {
+        const skin = this.getWeaponBodyColor('#334155', f.weaponMastery, f.gunWrap);
+        ctx.fillStyle = skin.fill;
+        ctx.fillRect(4 - kick, -3, weapon.length - 6, 5);
+        ctx.strokeRect(4 - kick, -3, weapon.length - 6, 5);
+        // Bow prod arcs
+        ctx.strokeStyle = skin.trim || '#94A3B8';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(weapon.length - 8 - kick, -11);
+        ctx.quadraticCurveTo(weapon.length - 1 - kick, 0, weapon.length - 8 - kick, 11);
+        ctx.stroke();
+        if (f.ammo > 0) {
+          ctx.fillStyle = '#FB7185';
+          ctx.fillRect(16 - kick, -1.5, weapon.length - 10, 2.5);
+        }
+      } else if (f.weaponId === 'boomstick') {
+        const skin = this.getWeaponBodyColor('#78350F', f.weaponMastery, f.gunWrap);
+        ctx.fillStyle = '#78350F';
+        ctx.fillRect(2 - kick, -2, 11, 6);
+        ctx.strokeRect(2 - kick, -2, 11, 6);
+        ctx.fillStyle = skin.fill;
+        ctx.fillRect(12 - kick, -5, weapon.length - 8, 4.2);
+        ctx.strokeRect(12 - kick, -5, weapon.length - 8, 4.2);
+        ctx.fillStyle = skin.trim || '#475569';
+        ctx.fillRect(12 - kick, -0.5, weapon.length - 8, 4.2);
+        ctx.strokeRect(12 - kick, -0.5, weapon.length - 8, 4.2);
       } else if (f.weaponId === 'ghost_pistol') {
-        const skin = this.getWeaponBodyColor('#1E293B', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#1E293B', f.weaponMastery, f.gunWrap);
         // Compact grip & slide + dark cylindrical suppressor
         ctx.fillStyle = '#0F172A';
         ctx.fillRect(6 - kick, -1, 5, 7);
@@ -2347,7 +3009,7 @@ export class ArenaRenderer {
         ctx.fillStyle = '#22D3EE';
         ctx.fillRect(17 - kick, 0.2, 3, 1.8);
       } else if (f.weaponId === 'revolver') {
-        const skin = this.getWeaponBodyColor('#94A3B8', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#94A3B8', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = '#78350F';
         ctx.fillRect(6 - kick, 0, 5, 7);
         ctx.strokeRect(6 - kick, 0, 5, 7);
@@ -2360,7 +3022,7 @@ export class ArenaRenderer {
         ctx.fillRect(16 - kick, -4, 10, 4);
         ctx.strokeRect(16 - kick, -4, 10, 4);
       } else if (f.weaponId === 'pistol') {
-        const skin = this.getWeaponBodyColor('#475569', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#475569', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = '#1E293B';
         ctx.fillRect(7 - kick, -1, 5, 7);
         ctx.strokeRect(7 - kick, -1, 5, 7);
@@ -2368,7 +3030,7 @@ export class ArenaRenderer {
         ctx.fillRect(7 - kick, -4, 14, 4.5);
         ctx.strokeRect(7 - kick, -4, 14, 4.5);
       } else if (f.weaponId === 'uzi') {
-        const skin = this.getWeaponBodyColor('#334155', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#334155', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = skin.fill;
         ctx.fillRect(5 - kick, -4, 16, 6);
         ctx.strokeRect(5 - kick, -4, 16, 6);
@@ -2378,7 +3040,7 @@ export class ArenaRenderer {
         ctx.strokeRect(10 - kick, 2, 4, 9);
         ctx.fillRect(21 - kick, -2.5, 5, 2.5);
       } else if (f.weaponId === 'mp7') {
-        const skin = this.getWeaponBodyColor('#1E293B', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#1E293B', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = skin.fill;
         ctx.fillRect(4 - kick, -4, weapon.length - 4, 6);
         ctx.strokeRect(4 - kick, -4, weapon.length - 4, 6);
@@ -2388,7 +3050,7 @@ export class ArenaRenderer {
         ctx.fillStyle = skin.trim || '#F59E0B';
         ctx.fillRect(9 - kick, -6, 9, 2);
       } else if (f.weaponId === 'shorty') {
-        const skin = this.getWeaponBodyColor('#92400E', f.weaponMastery);
+        const skin = this.getWeaponBodyColor('#92400E', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = '#78350F';
         ctx.fillRect(5 - kick, -1, 6, 6);
         ctx.strokeRect(5 - kick, -1, 6, 6);
@@ -2398,17 +3060,19 @@ export class ArenaRenderer {
       } else if (weapon.category === 'Sniper') {
         const skin = this.getWeaponBodyColor(
           f.weaponId === 'awq' ? '#4C1D95' : '#334155',
-          f.weaponMastery
+          f.weaponMastery,
+          f.gunWrap
         );
         ctx.fillStyle = skin.fill;
         ctx.fillRect(2 - kick, -3, weapon.length, 5);
         ctx.strokeRect(2 - kick, -3, weapon.length, 5);
-        ctx.fillStyle = '#38BDF8';
+        ctx.fillStyle = skin.trim || '#38BDF8';
         ctx.fillRect(10 - kick, -7, 11, 3.5);
       } else if (weapon.category === 'Shotgun') {
         const skin = this.getWeaponBodyColor(
           f.weaponId === 'spas12' ? '#1E293B' : '#7C2D12',
-          f.weaponMastery
+          f.weaponMastery,
+          f.gunWrap
         );
         ctx.fillStyle = skin.fill;
         ctx.fillRect(2 - kick, -3, weapon.length, 7);
@@ -2417,12 +3081,12 @@ export class ArenaRenderer {
         ctx.fillRect(8 - kick, -4, weapon.length - 6, 3);
       } else {
         const baseC =
-          f.ultActiveTimer > 0 && f.characterId === 'iron_bear'
-            ? '#DC2626'
+          f.ultActiveTimer > 0 && f.characterId === 'agent_404'
+            ? '#22C55E'
             : f.weaponId === 'm4a1'
             ? '#334155'
             : '#78350F';
-        const skin = this.getWeaponBodyColor(baseC, f.weaponMastery);
+        const skin = this.getWeaponBodyColor(baseC, f.weaponMastery, f.gunWrap);
         ctx.fillStyle = skin.fill;
         ctx.fillRect(4 - kick, -3, weapon.length, 6);
         ctx.strokeRect(4 - kick, -3, weapon.length, 6);
@@ -2430,14 +3094,18 @@ export class ArenaRenderer {
           ctx.fillStyle = skin.trim;
           ctx.fillRect(10 - kick, -2, 10, 4);
         }
+        if (skin.accent) {
+          ctx.fillStyle = skin.accent;
+          ctx.fillRect(22 - kick, -2, 4, 4);
+        }
       }
 
       if (f.muzzleFlashTimer > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.fillStyle =
-          f.ultActiveTimer > 0 && f.characterId === 'iron_bear'
-            ? '#EF4444'
+          f.ultActiveTimer > 0 && f.characterId === 'agent_404'
+            ? '#4ADE80'
             : f.weaponId === 'ghost_pistol'
             ? '#67E8F9'
             : '#FEF08A';
@@ -2589,7 +3257,27 @@ export class ArenaRenderer {
 
   private drawProjectile(ctx: CanvasRenderingContext2D, p: ProjectileEntity): void {
     ctx.save();
-    if (p.isHoming) {
+    if (p.isChappal) {
+      // Spinning Golden Heat-Seeking Flying Chappal!
+      ctx.translate(p.x, p.y);
+      ctx.rotate(performance.now() * 0.025);
+      ctx.fillStyle = '#FACC15';
+      ctx.strokeStyle = '#0B101B';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 5.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Slipper Y-strap
+      ctx.strokeStyle = '#EA580C';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(4, 0);
+      ctx.lineTo(-4, -3.5);
+      ctx.moveTo(4, 0);
+      ctx.lineTo(-4, 3.5);
+      ctx.stroke();
+    } else if (p.isHoming) {
       const ang = Math.atan2(p.vy, p.vx);
       ctx.translate(p.x, p.y);
       ctx.rotate(ang);
@@ -2615,10 +3303,41 @@ export class ArenaRenderer {
       ctx.lineTo(7, 4.5);
       ctx.closePath();
       ctx.fill();
+    } else if (p.stuck) {
+      const blink = Math.floor(performance.now() * 0.025) % 2 === 0;
+      ctx.translate(p.x, p.y);
+      ctx.fillStyle = blink ? '#FB7185' : '#FACC15';
+      ctx.beginPath();
+      ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = blink ? 'rgba(251, 113, 133, 0.7)' : 'rgba(250, 204, 21, 0.7)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (p.weaponId === 'crossbow_launcher') {
+      const ang = Math.atan2(p.vy, p.vx);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(ang);
+      ctx.fillStyle = '#E2E8F0';
+      ctx.fillRect(-10, -1.5, 16, 3);
+      ctx.fillStyle = '#FB7185';
+      ctx.beginPath();
+      ctx.moveTo(6, -3.5);
+      ctx.lineTo(12, 0);
+      ctx.lineTo(6, 3.5);
+      ctx.closePath();
+      ctx.fill();
     } else {
       ctx.strokeStyle = p.color;
       ctx.lineWidth =
-        p.weaponId === 'awq' || p.weaponId === 'dlp44' || p.weaponId === 'anu34' ? 3 : 2.2;
+        p.weaponId === 'awq' ||
+        p.weaponId === 'dlp44' ||
+        p.weaponId === 'anu34' ||
+        p.weaponId === 'plasma_repeater' ||
+        p.weaponId === 'freeze_ray'
+          ? 3
+          : 2.2;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(p.prevX, p.prevY);
@@ -2630,6 +3349,70 @@ export class ArenaRenderer {
       ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  private drawCookerBomb(
+    ctx: CanvasRenderingContext2D,
+    cb: CookerBombEntity,
+    elapsedSec: number
+  ): void {
+    ctx.save();
+    const wobble = Math.sin(elapsedSec * 28) * (cb.fuseTimer < 0.5 ? 0.16 : 0.06);
+    ctx.translate(cb.x, cb.y);
+    ctx.rotate(wobble);
+    // Steel cooker pot
+    ctx.fillStyle = '#CBD5E1';
+    ctx.strokeStyle = '#0B101B';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-11, -8, 22, 16, 4);
+    ctx.fill();
+    ctx.stroke();
+    // Lid & handle
+    ctx.fillStyle = '#64748B';
+    ctx.fillRect(-12, -10, 24, 3.5);
+    ctx.fillStyle = '#0F172A';
+    ctx.fillRect(11, -6, 6, 3);
+    // Red whistling pressure weight
+    ctx.fillStyle = '#EF4444';
+    ctx.fillRect(-2, -15, 4, 5);
+    ctx.restore();
+  }
+
+  private drawGeometryBeam(ctx: CanvasRenderingContext2D, bm: GeometryBeamEntity): void {
+    const alpha = Math.max(0, Math.min(1, bm.life / Math.max(0.05, bm.maxLife)));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = 'lighter';
+    const endX = bm.x + Math.cos(bm.angle) * bm.length;
+    const endY = bm.y + Math.sin(bm.angle) * bm.length;
+
+    if (!bm.isGossip) {
+      // Glowing Protractor Arcs at origin
+      ctx.strokeStyle = '#38BDF8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(bm.x, bm.y, 26, bm.angle - 0.85, bm.angle + 0.85);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(bm.x, bm.y, 16, bm.angle - 0.65, bm.angle + 0.65);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = bm.color || '#38BDF8';
+    ctx.lineWidth = bm.isGossip ? 4 : 9;
+    ctx.beginPath();
+    ctx.moveTo(bm.x, bm.y);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = bm.isGossip ? 1.5 : 3.2;
+    ctx.beginPath();
+    ctx.moveTo(bm.x, bm.y);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
     ctx.restore();
   }
 

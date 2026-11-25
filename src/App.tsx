@@ -41,6 +41,7 @@ import { OnlineRoomModal } from './components/OnlineRoomModal';
 import { PostMatchModal } from './components/PostMatchModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SocialPartyDrawer } from './components/SocialPartyDrawer';
+import { SplashIntroOverlay } from './components/SplashIntroOverlay';
 import { TouchControlsOverlay } from './components/TouchControlsOverlay';
 import {
   CHARACTERS,
@@ -184,13 +185,13 @@ export default function App() {
 
   // Profiles & Characters
   const [p1Profile, setP1Profile] = useState<PlayerProfile>(() =>
-    createGuestProfile(1, 'mitron')
+    createGuestProfile(1, 'chai_storm')
   );
   const [p2Profile, setP2Profile] = useState<PlayerProfile>(() =>
-    createGuestProfile(2, 'tariff_boss')
+    createGuestProfile(2, 'baron_voltage')
   );
-  const [p1Char, setP1Char] = useState<CharacterId>('mitron');
-  const [p2Char, setP2Char] = useState<CharacterId>('tariff_boss');
+  const [p1Char, setP1Char] = useState<CharacterId>('chai_storm');
+  const [p2Char, setP2Char] = useState<CharacterId>('baron_voltage');
 
   // Modals & Drawers
   const [authSlot, setAuthSlot] = useState<1 | 2 | null>(null);
@@ -262,6 +263,7 @@ export default function App() {
       meleeWeapon: p1Profile.cosmetics.equippedMelee || 'knife',
       xp: p1Profile.xp,
       masteryEquipped: p1Profile.masteryEquipped,
+      gunWrap: p1Profile.cosmetics.equippedWrap || 'none',
     };
   }, [p1Profile, p1Char]);
 
@@ -427,7 +429,7 @@ export default function App() {
           setP1Profile(prof1);
           const norm = normalizeCharacterId(prof1.avatarId);
           const allowed = prof1.cosmetics.unlockedCharacters || DEFAULT_FREE_CHARACTERS;
-          setP1Char(allowed.includes(norm) ? norm : 'mitron');
+          setP1Char(allowed.includes(norm) ? norm : 'chai_storm');
         }
       }
       if (p2Id) {
@@ -436,9 +438,9 @@ export default function App() {
           setP2Profile(prof2);
           const norm = normalizeCharacterId(prof2.avatarId);
           const allowed = prof2.cosmetics.unlockedCharacters || DEFAULT_FREE_CHARACTERS;
-          setP2Char(allowed.includes(norm) ? norm : 'tariff_boss');
+          setP2Char(allowed.includes(norm) ? norm : 'baron_voltage');
         } else if (prof2 && prof2.username.toLowerCase() === resolvedP1Name) {
-          setP2Profile(await createUniqueGuestProfile(2, 'tariff_boss', undefined, [prof2.username]));
+          setP2Profile(await createUniqueGuestProfile(2, 'baron_voltage', undefined, [prof2.username]));
           setActiveSessionId(2, null);
         }
       }
@@ -449,7 +451,8 @@ export default function App() {
     };
   }, []);
 
-  // Copyright & Humor Disclaimer Screen
+  // Studio Slash Splash Intro & Dismissible Parody Disclaimer
+  const [showSplash, setShowSplash] = useState<boolean>(true);
   const [disclaimerAcked, setDisclaimerAcked] = useState<boolean>(() => {
     try {
       return localStorage.getItem(DISCLAIMER_STORAGE_KEY) === 'accepted';
@@ -457,15 +460,18 @@ export default function App() {
       return false;
     }
   });
-  const [showDisclaimer, setShowDisclaimer] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(DISCLAIMER_STORAGE_KEY) !== 'accepted';
-    } catch {
-      return true;
-    }
-  });
+  const [showDisclaimer, setShowDisclaimer] = useState<boolean>(false);
 
-  const handleAcceptDisclaimer = () => {
+  const handleSplashComplete = useCallback((skippedByUser: boolean) => {
+    if (skippedByUser) {
+      soundEngine.unlock();
+      setAudioUnlocked(true);
+    }
+    setShowSplash(false);
+    setShowDisclaimer(true);
+  }, []);
+
+  const handleDismissDisclaimer = useCallback(() => {
     soundEngine.unlock();
     setAudioUnlocked(true);
     setDisclaimerAcked(true);
@@ -475,12 +481,7 @@ export default function App() {
     } catch {
       // Ignore storage error
     }
-  };
-
-  const handleUnlockAudioSplash = () => {
-    soundEngine.unlock();
-    setAudioUnlocked(true);
-  };
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) {
@@ -510,8 +511,8 @@ export default function App() {
       const validChar = unlocked.includes(safeChar)
         ? safeChar
         : slot === 1
-        ? 'mitron'
-        : 'tariff_boss';
+        ? 'chai_storm'
+        : 'baron_voltage';
       if (slot === 1) {
         setP1Profile(profile);
         setP1Char(validChar);
@@ -924,7 +925,7 @@ export default function App() {
           showRulesPanel ||
           showSocialDrawer ||
           showHowToPlay ||
-          (showDisclaimer && disclaimerAcked)
+          showDisclaimer
         ) {
           setAuthSlot(null);
           setShowCharacterModal(false);
@@ -934,7 +935,7 @@ export default function App() {
           setShowRulesPanel(false);
           setShowSocialDrawer(false);
           setShowHowToPlay(false);
-          if (disclaimerAcked) setShowDisclaimer(false);
+          if (showDisclaimer) handleDismissDisclaimer();
           return;
         }
         if (screen === 'PLAYING') {
@@ -1101,6 +1102,7 @@ export default function App() {
         secondaryWeapon: 'pistol',
         meleeWeapon: 'knife',
         weaponMastery: 'none',
+        gunWrap: 'none',
         xp: 900,
         rankTitle: friend.rankTitle,
         isHost: false,
@@ -1191,6 +1193,7 @@ export default function App() {
             flameId={p1Profile.cosmetics.equippedFlame}
             weaponId={p1Profile.cosmetics.equippedStartingWeapon}
             weaponMastery={equippedMastery}
+            gunWrap={p1Profile.cosmetics.equippedWrap || 'none'}
             partyMembers={partyMembers}
             paused={screen !== 'TITLE_MENU'}
             actionSignal={lobbyAction}
@@ -1818,7 +1821,7 @@ export default function App() {
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-slate-300 font-semibold">
-                  Doodle Bureau · made by samarth
+                  Doodle Bureau · made by somewhat dead man
                 </span>
                 <button
                   type="button"
@@ -1954,13 +1957,13 @@ export default function App() {
       )}
 
       {/* ================= MODALS ================= */}
-      {showDisclaimer && (
+      {showSplash && <SplashIntroOverlay onComplete={handleSplashComplete} />}
+
+      {!showSplash && showDisclaimer && (
         <DisclaimerModal
           requireAck={!disclaimerAcked}
-          onAccept={handleAcceptDisclaimer}
-          onClose={() => {
-            if (disclaimerAcked) setShowDisclaimer(false);
-          }}
+          onAccept={handleDismissDisclaimer}
+          onClose={handleDismissDisclaimer}
         />
       )}
 
@@ -2059,38 +2062,8 @@ export default function App() {
 
       {showHowToPlay && <HowToPlayModal onClose={() => setShowHowToPlay(false)} />}
 
-      {/* Click-to-Enter Audio Unlock Splash */}
-      {!showDisclaimer && !audioUnlocked && screen === 'TITLE_MENU' && (
-        <div
-          onClick={handleUnlockAudioSplash}
-          className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/75 p-4 cursor-pointer"
-        >
-          <div className="max-w-md w-full rounded-2xl border border-amber-500/50 bg-[#0F172A] p-7 text-center shadow-2xl space-y-4">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-amber-400/50 bg-amber-500/15 text-amber-300">
-              <Volume2 className="h-7 w-7" />
-            </div>
-            <div>
-              <h2 className="font-display text-3xl tracking-wide text-white uppercase">
-                Doodle Bureau
-              </h2>
-              <p className="mt-1 text-xs text-slate-300">
-                Click anywhere to enable arena sound effects, voice quips, and squad radio.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleUnlockAudioSplash}
-              className="w-full rounded-xl bg-amber-500 px-6 py-3 text-sm font-black uppercase tracking-wider text-slate-950 hover:bg-amber-400 transition-colors"
-            >
-              Click to Enter Arena
-            </button>
-            <div className="text-[11px] font-mono-tabular text-slate-400">made by samarth</div>
-          </div>
-        </div>
-      )}
-
       {/* Deep-Link ?party=XXXX Invite Prompt */}
-      {!showDisclaimer && audioUnlocked && pendingInviteCode && (
+      {!showSplash && !showDisclaimer && pendingInviteCode && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4">
           <div className="w-full max-w-md rounded-2xl border border-cyan-500/50 bg-[#0F172A] p-6 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">

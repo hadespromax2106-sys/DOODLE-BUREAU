@@ -149,6 +149,39 @@ const WeaponCategoryGlyph: React.FC<{ weaponId: KillFeedWeaponId }> = ({
       </svg>
     );
   }
+  if (weapon.category === 'Energy' || weapon.category === 'Cryo') {
+    return (
+      <svg
+        viewBox="0 0 22 12"
+        className={`h-3 w-4.5 shrink-0 ${
+          weapon.category === 'Cryo' ? 'text-sky-300' : 'text-cyan-300'
+        }`}
+        aria-hidden="true"
+      >
+        <path d="M1 5h12l2-2h6v2h-4v2h4v2h-6l-2-2H7l-1.5 3H3l1.2-3H1V5z" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (weapon.category === 'Minigun') {
+    return (
+      <svg viewBox="0 0 24 12" className="h-3 w-5 text-amber-300 shrink-0" aria-hidden="true">
+        <path
+          d="M1 4h8l2 1.2h11v1H11v1h11v1H11v1H9L7 11H2l1.5-3H1V4z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+  if (weapon.category === 'Crossbow') {
+    return (
+      <svg viewBox="0 0 22 12" className="h-3 w-4.5 text-rose-300 shrink-0" aria-hidden="true">
+        <path
+          d="M12 1l4 5-4 5h-1.5l3-4.2H1V5.2h12.5L10.5 1H12z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 22 12" className="h-3 w-4.5 text-amber-300 shrink-0" aria-hidden="true">
       <path

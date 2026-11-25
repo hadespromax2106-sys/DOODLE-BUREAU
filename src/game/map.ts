@@ -7,6 +7,7 @@ export interface PlatformRect {
   w: number;
   h: number;
   kind: 'solid' | 'oneway' | 'cover';
+  outerCollapse?: boolean;
   style:
     | 'concrete'
     | 'grate'
@@ -155,6 +156,51 @@ export interface CtfBasesConfig {
   bravo: SpawnPoint;
 }
 
+export interface PortalPairConfig {
+  id: string;
+  aX: number;
+  aY: number;
+  bX: number;
+  bY: number;
+  radius: number;
+}
+
+export interface JumpPadSpawn {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+}
+
+export interface WindVentSpawn {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  height: number;
+}
+
+export interface TurretSpawnConfig {
+  x: number;
+  y: number;
+  terminalX: number;
+  terminalY: number;
+}
+
+export interface GlassFloorSpawn {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface SubwayTrackConfig {
+  y: number;
+  minX: number;
+  maxX: number;
+}
+
 export interface ArenaMap {
   id: MapId;
   name: string;
@@ -178,6 +224,12 @@ export interface ArenaMap {
   vines?: VineProp[];
   waterPools?: WaterPoolZone[];
   radarTowers?: RadarTowerProp[];
+  portalPair?: PortalPairConfig;
+  jumpPads?: JumpPadSpawn[];
+  windVents?: WindVentSpawn[];
+  turretSpawn?: TurretSpawnConfig;
+  glassFloors?: GlassFloorSpawn[];
+  subwayTrack?: SubwayTrackConfig;
 }
 
 export type CityMap = ArenaMap;
@@ -224,14 +276,14 @@ const CITY_DUSK_MAP: ArenaMap = {
     { id: 'ceiling', x: 0, y: 0, w: 2600, h: 32, kind: 'solid', style: 'concrete' },
 
     // West Skyscraper Ruin
-    { id: 'c_w_f1', x: 110, y: 865, w: 420, h: 24, kind: 'oneway', style: 'concrete' },
-    { id: 'c_w_f2', x: 130, y: 675, w: 390, h: 24, kind: 'oneway', style: 'concrete' },
-    { id: 'c_w_roof', x: 95, y: 485, w: 450, h: 28, kind: 'solid', style: 'concrete' },
-    { id: 'c_w_parapet', x: 420, y: 415, w: 32, h: 70, kind: 'cover', style: 'brick' },
+    { id: 'c_w_f1', x: 110, y: 865, w: 420, h: 24, kind: 'oneway', style: 'concrete', outerCollapse: true },
+    { id: 'c_w_f2', x: 130, y: 675, w: 390, h: 24, kind: 'oneway', style: 'concrete', outerCollapse: true },
+    { id: 'c_w_roof', x: 95, y: 485, w: 450, h: 28, kind: 'solid', style: 'concrete', outerCollapse: true },
+    { id: 'c_w_parapet', x: 420, y: 415, w: 32, h: 70, kind: 'cover', style: 'brick', outerCollapse: true },
     { id: 'c_w_pillar', x: 640, y: 950, w: 40, h: 100, kind: 'cover', style: 'brick' },
 
     // Mid-West Overpass
-    { id: 'c_bridge_l', x: 630, y: 785, w: 290, h: 22, kind: 'oneway', style: 'grate' },
+    { id: 'c_bridge_l', x: 630, y: 785, w: 290, h: 22, kind: 'oneway', style: 'grate', outerCollapse: true },
 
     // Central Parliament Plaza & Podium
     { id: 'c_plaza_low', x: 1020, y: 900, w: 560, h: 24, kind: 'oneway', style: 'concrete' },
@@ -241,15 +293,30 @@ const CITY_DUSK_MAP: ArenaMap = {
     { id: 'c_pod_blk_r', x: 1498, y: 615, w: 32, h: 75, kind: 'cover', style: 'sandbag' },
 
     // Mid-East Overpass
-    { id: 'c_bridge_r', x: 1680, y: 785, w: 290, h: 22, kind: 'oneway', style: 'grate' },
+    { id: 'c_bridge_r', x: 1680, y: 785, w: 290, h: 22, kind: 'oneway', style: 'grate', outerCollapse: true },
 
     // East Skyscraper Ruin
-    { id: 'c_e_f1', x: 2070, y: 865, w: 420, h: 24, kind: 'oneway', style: 'concrete' },
-    { id: 'c_e_f2', x: 2080, y: 675, w: 390, h: 24, kind: 'oneway', style: 'concrete' },
-    { id: 'c_e_roof', x: 2055, y: 485, w: 450, h: 28, kind: 'solid', style: 'concrete' },
-    { id: 'c_e_parapet', x: 2140, y: 415, w: 32, h: 70, kind: 'cover', style: 'brick' },
+    { id: 'c_e_f1', x: 2070, y: 865, w: 420, h: 24, kind: 'oneway', style: 'concrete', outerCollapse: true },
+    { id: 'c_e_f2', x: 2080, y: 675, w: 390, h: 24, kind: 'oneway', style: 'concrete', outerCollapse: true },
+    { id: 'c_e_roof', x: 2055, y: 485, w: 450, h: 28, kind: 'solid', style: 'concrete', outerCollapse: true },
+    { id: 'c_e_parapet', x: 2140, y: 415, w: 32, h: 70, kind: 'cover', style: 'brick', outerCollapse: true },
     { id: 'c_e_pillar', x: 1920, y: 950, w: 40, h: 100, kind: 'cover', style: 'brick' },
   ],
+  portalPair: { id: 'c_portal', aX: 160, aY: 625, bX: 2440, bY: 625, radius: 34 },
+  jumpPads: [
+    { id: 'c_jp_l', x: 540, y: 1038, w: 72 },
+    { id: 'c_jp_r', x: 1988, y: 1038, w: 72 },
+  ],
+  windVents: [
+    { id: 'c_wv_l', x: 935, y: 1076, w: 70, height: 390 },
+    { id: 'c_wv_r', x: 1595, y: 1076, w: 70, height: 390 },
+  ],
+  turretSpawn: { x: 1300, y: 86, terminalX: 1300, terminalY: 690 },
+  glassFloors: [
+    { id: 'c_gf_l', x: 865, y: 690, w: 190, h: 16 },
+    { id: 'c_gf_r', x: 1545, y: 690, w: 190, h: 16 },
+  ],
+  subwayTrack: { y: 1050, minX: 40, maxX: 2560 },
   destructibleWalls: [
     createDestructibleWall('cd_glass_w', 310, 675, 22, 110, 'glass', 55, 18),
     createDestructibleWall('cd_crate_w', 460, 1050, 48, 52, 'crate_wood', 65, 20),
@@ -348,12 +415,12 @@ const JUNGLE_FORTRESS_MAP: ArenaMap = {
     { id: 'ceiling', x: 0, y: 0, w: 2600, h: 32, kind: 'solid', style: 'moss' },
 
     // West Temple Terraces
-    { id: 'j_w_f1', x: 100, y: 850, w: 360, h: 24, kind: 'solid', style: 'moss' },
-    { id: 'j_w_f2', x: 150, y: 635, w: 340, h: 24, kind: 'oneway', style: 'timber' },
-    { id: 'j_w_pillar', x: 310, y: 745, w: 38, h: 105, kind: 'cover', style: 'timber' },
+    { id: 'j_w_f1', x: 100, y: 850, w: 360, h: 24, kind: 'solid', style: 'moss', outerCollapse: true },
+    { id: 'j_w_f2', x: 150, y: 635, w: 340, h: 24, kind: 'oneway', style: 'timber', outerCollapse: true },
+    { id: 'j_w_pillar', x: 310, y: 745, w: 38, h: 105, kind: 'cover', style: 'timber', outerCollapse: true },
 
     // Mossy Rope Bridges over Water Pools
-    { id: 'j_bridge_l', x: 540, y: 830, w: 350, h: 22, kind: 'oneway', style: 'timber' },
+    { id: 'j_bridge_l', x: 540, y: 830, w: 350, h: 22, kind: 'oneway', style: 'timber', outerCollapse: true },
     { id: 'j_step_l', x: 650, y: 1015, w: 130, h: 20, kind: 'solid', style: 'moss' },
 
     // Central Temple Ruins
@@ -365,13 +432,27 @@ const JUNGLE_FORTRESS_MAP: ArenaMap = {
     { id: 'j_c_blk', x: 1280, y: 970, w: 40, h: 80, kind: 'cover', style: 'timber' },
 
     // East Rope Bridge
-    { id: 'j_bridge_r', x: 1710, y: 830, w: 350, h: 22, kind: 'oneway', style: 'timber' },
+    { id: 'j_bridge_r', x: 1710, y: 830, w: 350, h: 22, kind: 'oneway', style: 'timber', outerCollapse: true },
     { id: 'j_step_r', x: 1820, y: 1015, w: 130, h: 20, kind: 'solid', style: 'moss' },
 
     // East Temple Terraces
-    { id: 'j_e_f1', x: 2140, y: 850, w: 360, h: 24, kind: 'solid', style: 'moss' },
-    { id: 'j_e_f2', x: 2110, y: 635, w: 340, h: 24, kind: 'oneway', style: 'timber' },
-    { id: 'j_e_pillar', x: 2250, y: 745, w: 38, h: 105, kind: 'cover', style: 'timber' },
+    { id: 'j_e_f1', x: 2140, y: 850, w: 360, h: 24, kind: 'solid', style: 'moss', outerCollapse: true },
+    { id: 'j_e_f2', x: 2110, y: 635, w: 340, h: 24, kind: 'oneway', style: 'timber', outerCollapse: true },
+    { id: 'j_e_pillar', x: 2250, y: 745, w: 38, h: 105, kind: 'cover', style: 'timber', outerCollapse: true },
+  ],
+  portalPair: { id: 'j_portal', aX: 165, aY: 575, bX: 2435, bY: 575, radius: 34 },
+  jumpPads: [
+    { id: 'j_jp_l', x: 350, y: 1038, w: 72 },
+    { id: 'j_jp_r', x: 2178, y: 1038, w: 72 },
+  ],
+  windVents: [
+    { id: 'j_wv_l', x: 890, y: 1040, w: 70, height: 390 },
+    { id: 'j_wv_r', x: 1640, y: 1040, w: 70, height: 390 },
+  ],
+  turretSpawn: { x: 1300, y: 86, terminalX: 1300, terminalY: 650 },
+  glassFloors: [
+    { id: 'j_gf_l', x: 895, y: 650, w: 140, h: 16 },
+    { id: 'j_gf_r', x: 1565, y: 650, w: 140, h: 16 },
   ],
   destructibleWalls: [
     createDestructibleWall('jd_crate_w', 220, 850, 50, 54, 'crate_wood', 65, 20),
@@ -460,10 +541,10 @@ const SCORCHED_DESERT_MAP: ArenaMap = {
     { id: 'ceiling', x: 0, y: 0, w: 2600, h: 32, kind: 'solid', style: 'sandstone' },
 
     // West Bunker & Oasis Ledge
-    { id: 'd_w_bunker', x: 130, y: 840, w: 380, h: 28, kind: 'solid', style: 'sandstone' },
-    { id: 'd_w_pillar', x: 420, y: 745, w: 36, h: 95, kind: 'cover', style: 'sandstone' },
-    { id: 'd_w_oasis', x: 150, y: 605, w: 310, h: 24, kind: 'oneway', style: 'timber' },
-    { id: 'd_step_l', x: 640, y: 740, w: 280, h: 22, kind: 'oneway', style: 'sandstone' },
+    { id: 'd_w_bunker', x: 130, y: 840, w: 380, h: 28, kind: 'solid', style: 'sandstone', outerCollapse: true },
+    { id: 'd_w_pillar', x: 420, y: 745, w: 36, h: 95, kind: 'cover', style: 'sandstone', outerCollapse: true },
+    { id: 'd_w_oasis', x: 150, y: 605, w: 310, h: 24, kind: 'oneway', style: 'timber', outerCollapse: true },
+    { id: 'd_step_l', x: 640, y: 740, w: 280, h: 22, kind: 'oneway', style: 'sandstone', outerCollapse: true },
 
     // Central Sandstone Citadel
     { id: 'd_c_low', x: 1030, y: 880, w: 540, h: 26, kind: 'oneway', style: 'sandstone' },
@@ -473,10 +554,24 @@ const SCORCHED_DESERT_MAP: ArenaMap = {
     { id: 'd_c_top', x: 1155, y: 470, w: 290, h: 22, kind: 'oneway', style: 'grate' },
 
     // East Bunker & Oasis Ledge
-    { id: 'd_step_r', x: 1680, y: 740, w: 280, h: 22, kind: 'oneway', style: 'sandstone' },
-    { id: 'd_e_bunker', x: 2090, y: 840, w: 380, h: 28, kind: 'solid', style: 'sandstone' },
-    { id: 'd_e_pillar', x: 2144, y: 745, w: 36, h: 95, kind: 'cover', style: 'sandstone' },
-    { id: 'd_e_oasis', x: 2140, y: 605, w: 310, h: 24, kind: 'oneway', style: 'timber' },
+    { id: 'd_step_r', x: 1680, y: 740, w: 280, h: 22, kind: 'oneway', style: 'sandstone', outerCollapse: true },
+    { id: 'd_e_bunker', x: 2090, y: 840, w: 380, h: 28, kind: 'solid', style: 'sandstone', outerCollapse: true },
+    { id: 'd_e_pillar', x: 2144, y: 745, w: 36, h: 95, kind: 'cover', style: 'sandstone', outerCollapse: true },
+    { id: 'd_e_oasis', x: 2140, y: 605, w: 310, h: 24, kind: 'oneway', style: 'timber', outerCollapse: true },
+  ],
+  portalPair: { id: 'd_portal', aX: 165, aY: 545, bX: 2435, bY: 545, radius: 34 },
+  jumpPads: [
+    { id: 'd_jp_l', x: 460, y: 1038, w: 72 },
+    { id: 'd_jp_r', x: 2068, y: 1038, w: 72 },
+  ],
+  windVents: [
+    { id: 'd_wv_l', x: 960, y: 1002, w: 70, height: 390 },
+    { id: 'd_wv_r', x: 1570, y: 1002, w: 70, height: 390 },
+  ],
+  turretSpawn: { x: 1300, y: 86, terminalX: 1300, terminalY: 700 },
+  glassFloors: [
+    { id: 'd_gf_l', x: 915, y: 700, w: 150, h: 16 },
+    { id: 'd_gf_r', x: 1535, y: 700, w: 150, h: 16 },
   ],
   destructibleWalls: [
     createDestructibleWall('dd_sand_w', 575, 1050, 38, 110, 'sandstone', 145, 24),
@@ -567,13 +662,13 @@ const ARCTIC_BUNKER_MAP: ArenaMap = {
     { id: 'ceiling', x: 0, y: 0, w: 2600, h: 32, kind: 'solid', style: 'snow' },
 
     // West Radar Ridge
-    { id: 'a_w_ridge', x: 120, y: 840, w: 410, h: 26, kind: 'solid', style: 'snow' },
-    { id: 'a_w_ice', x: 170, y: 650, w: 340, h: 22, kind: 'oneway', style: 'ice' },
-    { id: 'a_w_radar_base', x: 130, y: 465, w: 310, h: 26, kind: 'solid', style: 'concrete' },
-    { id: 'a_w_blk', x: 400, y: 760, w: 36, h: 80, kind: 'cover', style: 'sandbag' },
+    { id: 'a_w_ridge', x: 120, y: 840, w: 410, h: 26, kind: 'solid', style: 'snow', outerCollapse: true },
+    { id: 'a_w_ice', x: 170, y: 650, w: 340, h: 22, kind: 'oneway', style: 'ice', outerCollapse: true },
+    { id: 'a_w_radar_base', x: 130, y: 465, w: 310, h: 26, kind: 'solid', style: 'concrete', outerCollapse: true },
+    { id: 'a_w_blk', x: 400, y: 760, w: 36, h: 80, kind: 'cover', style: 'sandbag', outerCollapse: true },
 
     // Ice Shelf Flanks
-    { id: 'a_shelf_l', x: 660, y: 790, w: 300, h: 22, kind: 'oneway', style: 'ice' },
+    { id: 'a_shelf_l', x: 660, y: 790, w: 300, h: 22, kind: 'oneway', style: 'ice', outerCollapse: true },
 
     // Central Border Command Bunker
     { id: 'a_c_low', x: 1030, y: 875, w: 540, h: 24, kind: 'oneway', style: 'grate' },
@@ -582,13 +677,27 @@ const ARCTIC_BUNKER_MAP: ArenaMap = {
     { id: 'a_c_blk_l', x: 1090, y: 605, w: 32, h: 75, kind: 'cover', style: 'concrete' },
     { id: 'a_c_blk_r', x: 1478, y: 605, w: 32, h: 75, kind: 'cover', style: 'concrete' },
 
-    { id: 'a_shelf_r', x: 1640, y: 790, w: 300, h: 22, kind: 'oneway', style: 'ice' },
+    { id: 'a_shelf_r', x: 1640, y: 790, w: 300, h: 22, kind: 'oneway', style: 'ice', outerCollapse: true },
 
     // East Radar Ridge
-    { id: 'a_e_ridge', x: 2070, y: 840, w: 410, h: 26, kind: 'solid', style: 'snow' },
-    { id: 'a_e_ice', x: 2090, y: 650, w: 340, h: 22, kind: 'oneway', style: 'ice' },
-    { id: 'a_e_radar_base', x: 2160, y: 465, w: 310, h: 26, kind: 'solid', style: 'concrete' },
-    { id: 'a_e_blk', x: 2164, y: 760, w: 36, h: 80, kind: 'cover', style: 'sandbag' },
+    { id: 'a_e_ridge', x: 2070, y: 840, w: 410, h: 26, kind: 'solid', style: 'snow', outerCollapse: true },
+    { id: 'a_e_ice', x: 2090, y: 650, w: 340, h: 22, kind: 'oneway', style: 'ice', outerCollapse: true },
+    { id: 'a_e_radar_base', x: 2160, y: 465, w: 310, h: 26, kind: 'solid', style: 'concrete', outerCollapse: true },
+    { id: 'a_e_blk', x: 2164, y: 760, w: 36, h: 80, kind: 'cover', style: 'sandbag', outerCollapse: true },
+  ],
+  portalPair: { id: 'a_portal', aX: 165, aY: 595, bX: 2435, bY: 595, radius: 34 },
+  jumpPads: [
+    { id: 'a_jp_l', x: 460, y: 1038, w: 72 },
+    { id: 'a_jp_r', x: 2068, y: 1038, w: 72 },
+  ],
+  windVents: [
+    { id: 'a_wv_l', x: 960, y: 1042, w: 70, height: 390 },
+    { id: 'a_wv_r', x: 1570, y: 1042, w: 70, height: 390 },
+  ],
+  turretSpawn: { x: 1300, y: 86, terminalX: 1300, terminalY: 680 },
+  glassFloors: [
+    { id: 'a_gf_l', x: 930, y: 680, w: 145, h: 16 },
+    { id: 'a_gf_r', x: 1525, y: 680, w: 145, h: 16 },
   ],
   destructibleWalls: [
     createDestructibleWall('ad_glass_w', 300, 650, 22, 105, 'glass', 55, 18),
@@ -696,14 +805,14 @@ const HYBRID_ARENA_MAP: ArenaMap = {
     { id: 'ceiling', x: 0, y: 0, w: 4400, h: 32, kind: 'solid', style: 'concrete' },
 
     // ZONE 1: ABANDONED CITY
-    { id: 'city_f1', x: 90, y: 1000, w: 430, h: 24, kind: 'oneway', style: 'concrete' },
-    { id: 'city_f2', x: 110, y: 795, w: 400, h: 24, kind: 'oneway', style: 'concrete' },
-    { id: 'city_roof', x: 75, y: 585, w: 455, h: 28, kind: 'solid', style: 'concrete' },
-    { id: 'city_ruin_wall', x: 75, y: 613, w: 28, h: 210, kind: 'solid', style: 'brick' },
-    { id: 'city_parapet', x: 410, y: 515, w: 34, h: 70, kind: 'cover', style: 'concrete' },
+    { id: 'city_f1', x: 90, y: 1000, w: 430, h: 24, kind: 'oneway', style: 'concrete', outerCollapse: true },
+    { id: 'city_f2', x: 110, y: 795, w: 400, h: 24, kind: 'oneway', style: 'concrete', outerCollapse: true },
+    { id: 'city_roof', x: 75, y: 585, w: 455, h: 28, kind: 'solid', style: 'concrete', outerCollapse: true },
+    { id: 'city_ruin_wall', x: 75, y: 613, w: 28, h: 210, kind: 'solid', style: 'brick', outerCollapse: true },
+    { id: 'city_parapet', x: 410, y: 515, w: 34, h: 70, kind: 'cover', style: 'concrete', outerCollapse: true },
     { id: 'city_pillar_1', x: 340, y: 1090, w: 38, h: 110, kind: 'cover', style: 'concrete' },
-    { id: 'city_cover_f2', x: 295, y: 735, w: 36, h: 60, kind: 'cover', style: 'brick' },
-    { id: 'city_bridge_l', x: 580, y: 925, w: 230, h: 24, kind: 'oneway', style: 'grate' },
+    { id: 'city_cover_f2', x: 295, y: 735, w: 36, h: 60, kind: 'cover', style: 'brick', outerCollapse: true },
+    { id: 'city_bridge_l', x: 580, y: 925, w: 230, h: 24, kind: 'oneway', style: 'grate', outerCollapse: true },
     { id: 'city_plaza', x: 840, y: 1020, w: 360, h: 26, kind: 'oneway', style: 'concrete' },
     { id: 'city_tower_mid', x: 860, y: 720, w: 320, h: 28, kind: 'solid', style: 'concrete' },
     { id: 'city_tower_top', x: 905, y: 470, w: 230, h: 24, kind: 'oneway', style: 'grate' },
@@ -747,11 +856,27 @@ const HYBRID_ARENA_MAP: ArenaMap = {
     { id: 'des_fort_top', x: 3680, y: 615, w: 270, h: 24, kind: 'oneway', style: 'grate' },
     { id: 'des_pit_crate', x: 3785, y: 1155, w: 70, h: 80, kind: 'cover', style: 'crate_cover' },
 
-    { id: 'des_east_f1', x: 4040, y: 1000, w: 300, h: 24, kind: 'oneway', style: 'sandstone' },
-    { id: 'des_east_f2', x: 4050, y: 785, w: 290, h: 26, kind: 'solid', style: 'sandstone' },
-    { id: 'des_east_blk', x: 4160, y: 700, w: 48, h: 85, kind: 'cover', style: 'crate_cover' },
-    { id: 'des_east_top', x: 4070, y: 560, w: 260, h: 24, kind: 'oneway', style: 'sandstone' },
+    { id: 'des_east_f1', x: 4040, y: 1000, w: 300, h: 24, kind: 'oneway', style: 'sandstone', outerCollapse: true },
+    { id: 'des_east_f2', x: 4050, y: 785, w: 290, h: 26, kind: 'solid', style: 'sandstone', outerCollapse: true },
+    { id: 'des_east_blk', x: 4160, y: 700, w: 48, h: 85, kind: 'cover', style: 'crate_cover', outerCollapse: true },
+    { id: 'des_east_top', x: 4070, y: 560, w: 260, h: 24, kind: 'oneway', style: 'sandstone', outerCollapse: true },
   ],
+  portalPair: { id: 'h_portal', aX: 190, aY: 740, bX: 4210, bY: 730, radius: 36 },
+  jumpPads: [
+    { id: 'h_jp_city', x: 540, y: 1188, w: 72 },
+    { id: 'h_jp_maze', x: 2020, y: 1188, w: 72 },
+    { id: 'h_jp_des', x: 3510, y: 1188, w: 72 },
+  ],
+  windVents: [
+    { id: 'h_wv_city', x: 1475, y: 1190, w: 70, height: 420 },
+    { id: 'h_wv_des', x: 2990, y: 1190, w: 70, height: 420 },
+  ],
+  turretSpawn: { x: 2270, y: 90, terminalX: 2250, terminalY: 830 },
+  glassFloors: [
+    { id: 'h_gf_l', x: 1955, y: 520, w: 175, h: 16 },
+    { id: 'h_gf_r', x: 2410, y: 520, w: 175, h: 16 },
+  ],
+  subwayTrack: { y: 1200, minX: 40, maxX: 1520 },
   destructibleWalls: [
     createDestructibleWall('dwall_city_alley', 690, 1245, 36, 120, 'brick', 140, 24),
     createDestructibleWall('dwall_city_plaza', 1110, 1020, 22, 100, 'glass', 60, 20),

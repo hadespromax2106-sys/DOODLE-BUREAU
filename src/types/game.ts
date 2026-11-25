@@ -8,7 +8,13 @@ export type PrimaryWeaponId =
   | 'anu34'
   | 'dlp44'
   | 'awq'
-  | 'bomberier';
+  | 'bomberier'
+  | 'plasma_repeater'
+  | 'boomstick'
+  | 'minigun'
+  | 'crossbow_launcher'
+  | 'freeze_ray'
+  | 'orbital_laser';
 
 export type SecondaryWeaponId =
   | 'pistol'
@@ -30,7 +36,16 @@ export type MapId =
   | 'arctic_bunker'
   | 'hybrid_arena';
 
-export type MatchGameMode = 'tdm' | 'hardpoint' | 'domination' | 'ffa' | 'ctf';
+export type MatchGameMode =
+  | 'tdm'
+  | 'hardpoint'
+  | 'domination'
+  | 'ffa'
+  | 'ctf'
+  | 'gun_game'
+  | 'vip'
+  | 'boss_raid'
+  | 'one_in_chamber';
 
 export type TeamId = 'alpha' | 'bravo';
 
@@ -54,14 +69,32 @@ export type ZoomLevel = 0.5 | 1 | 2 | 3;
 
 export type PowerUpType = 'speed' | 'fuel_efficiency' | 'shield';
 
+export type MysteryPowerUpType = 'shrink' | 'mega_size' | 'bubble_shield' | 'holo_decoy';
+
+export type AnyPowerUpType = PowerUpType | MysteryPowerUpType;
+
+export type ChaosEventType =
+  | 'zero_gravity'
+  | 'golden_airdrop'
+  | 'blackout'
+  | 'hyper_frenzy';
+
+export type EmoteId = 'chai' | 'trophy' | 'laugh_skull';
+export type SprayId = 'chai_break' | 'aim_404';
+
 export type CharacterId =
-  | 'mitron'
-  | 'tariff_boss'
-  | 'revolutionary'
-  | 'yogi_boy'
-  | 'red_dragon'
-  | 'iron_bear'
-  | 'dashing_trudeau'
+  | 'chai_storm'
+  | 'baron_voltage'
+  | 'captain_jalebi'
+  | 'baba_wifi'
+  | 'general_noodle'
+  | 'agent_404'
+  | 'prof_jugaad'
+  | 'chappal_ninja'
+  | 'dj_dholak'
+  | 'aunty_cctv'
+  | 'bhaijaan_gymbro'
+  | 'exam_topper'
   | 'thongi_baba';
 
 export type FlameColorId =
@@ -78,7 +111,18 @@ export type OutfitId =
   | 'olive'
   | 'burgundy'
   | 'stealth'
-  | 'sovereign';
+  | 'sovereign'
+  | 'neon_cyber';
+
+export type GunWrapId =
+  | 'none'
+  | 'carbon_fiber'
+  | 'lava_magma'
+  | 'electric_ice'
+  | 'royal_gold'
+  | 'comic_halftone'
+  | 'galaxy_void'
+  | 'golden_kettle';
 
 export type RankId =
   | 'intern'
@@ -103,13 +147,18 @@ export interface CharacterDef {
   skinTone: string;
   hairColor: string;
   hairStyle:
-    | 'swept_white'
-    | 'swept_blonde'
-    | 'short_stubble'
-    | 'shaved_tilak'
-    | 'mao_part'
-    | 'receding_blonde'
-    | 'wavy_curls'
+    | 'chai_specs'
+    | 'voltage_mask'
+    | 'jalebi_band'
+    | 'wifi_visor'
+    | 'bowl_drones'
+    | 'spy_fedora'
+    | 'einstein_goggles'
+    | 'bun_hairpin'
+    | 'dj_shades'
+    | 'aunty_dish'
+    | 'gym_sweatband'
+    | 'topper_swirl'
     | 'steve_sigma';
   defaultSuitColor: string;
   tieColor: string;
@@ -136,7 +185,11 @@ export interface WeaponDef {
     | 'Sniper'
     | 'Rocket Launcher'
     | 'Pistol'
-    | 'Revolver';
+    | 'Revolver'
+    | 'Energy'
+    | 'Minigun'
+    | 'Crossbow'
+    | 'Cryo';
   damage: number;
   fireRateMs: number;
   clipSize: number;
@@ -152,6 +205,11 @@ export interface WeaponDef {
   suppressed?: boolean;
   burstCount?: number;
   burstIntervalMs?: number;
+  noDrop?: boolean;
+  knockback?: number;
+  spinUpMs?: number;
+  stickyExplosive?: boolean;
+  freezeDurationSec?: number;
 }
 
 export interface MeleeWeaponDef {
@@ -211,11 +269,13 @@ export interface PlayerCosmetics {
   unlockedSecondaries?: SecondaryWeaponId[];
   unlockedMelees?: MeleeWeaponId[];
   unlockedCharacters?: CharacterId[];
+  unlockedWraps?: GunWrapId[];
   equippedFlame: FlameColorId;
   equippedOutfit: OutfitId;
   equippedStartingWeapon: WeaponId;
   equippedSecondary?: SecondaryWeaponId;
   equippedMelee?: MeleeWeaponId;
+  equippedWrap?: GunWrapId;
 }
 
 export type FriendStatus = 'online' | 'in_match' | 'offline';
@@ -254,6 +314,7 @@ export interface PartyMember {
   secondaryWeapon?: SecondaryWeaponId;
   meleeWeapon?: MeleeWeaponId;
   weaponMastery: WeaponMasteryTier;
+  gunWrap?: GunWrapId;
   xp: number;
   rankTitle: string;
   isHost: boolean;
@@ -296,6 +357,7 @@ export interface PlayerProfile {
   dailyChallenges?: DailyChallengeProgress[];
   friends?: FriendEntry[];
   friendRequests?: FriendRequest[];
+  redeemedCodes?: string[];
   createdAt: number;
   lastPlayedAt: number;
   isGuest?: boolean;
@@ -309,6 +371,7 @@ export type ScreenState =
   | 'PLAYING'
   | 'PAUSED'
   | 'KILL_CAM'
+  | 'MVP_SPOTLIGHT'
   | 'MATCH_SUMMARY';
 
 export interface FighterMatchTelemetry {
@@ -320,6 +383,9 @@ export interface FighterMatchTelemetry {
   killstreaksEarned: number;
   usedOnlySniper: boolean;
   kothPoints: number;
+  afterlifeKills?: number;
+  nemesisKills?: number;
+  nemesisRevengeCoins?: number;
 }
 
 export interface FighterMatchSummary {
@@ -337,6 +403,8 @@ export interface FighterMatchSummary {
   rankTitle: string;
   kothPoints?: number;
   objectivePoints?: number;
+  afterlifeKills?: number;
+  nemesisKills?: number;
   telemetry?: FighterMatchTelemetry;
 }
 
@@ -362,6 +430,9 @@ export interface PlayerMatchReward {
   won: boolean;
   xpEarned: number;
   coinsEarned: number;
+  nemesisRevengeCoins?: number;
+  nemesisKills?: number;
+  afterlifeKills?: number;
   prevXp: number;
   newXp: number;
   prevRank: RankDef;
@@ -391,6 +462,7 @@ export interface HudFighterSnapshot {
   secondaryWeaponId: SecondaryWeaponId;
   meleeWeaponId: MeleeWeaponId;
   weaponMastery: WeaponMasteryTier;
+  gunWrap?: GunWrapId;
   ammo: number;
   maxAmmo: number;
   isReloading: boolean;
@@ -406,6 +478,8 @@ export interface HudFighterSnapshot {
   fuelBuffTimer: number;
   shieldHp: number;
   shieldBuffTimer: number;
+  freezeTimer?: number;
+  empDisableTimer?: number;
   wallSliding: boolean;
   grenades: number;
   grenadeType: GrenadeType;
@@ -418,6 +492,20 @@ export interface HudFighterSnapshot {
   kothPoints: number;
   inPodium: boolean;
   carryingFlagTeam?: TeamId | null;
+  grappleActive?: boolean;
+  dashCooldownPct?: number;
+  shrinkTimer?: number;
+  megaSizeTimer?: number;
+  bubbleShieldHp?: number;
+  bubbleShieldTimer?: number;
+  isLastStand?: boolean;
+  lastStandTimer?: number;
+  isVip?: boolean;
+  isBoss?: boolean;
+  gunGameTier?: number;
+  nemesisKillerIds?: string[];
+  afterlifeKills?: number;
+  nemesisKills?: number;
 }
 
 export type KillFeedWeaponId =
@@ -430,7 +518,11 @@ export type KillFeedWeaponId =
   | 'plasma'
   | 'airstrike'
   | 'dual_pistols'
-  | 'dual_smgs';
+  | 'dual_smgs'
+  | 'turret'
+  | 'train'
+  | 'last_stand'
+  | 'emp';
 
 export interface KillFeedItem {
   id: number;
@@ -457,6 +549,13 @@ export interface HudDualWieldDrop {
   x: number;
   y: number;
   type: DualWieldType;
+}
+
+export interface HudWeaponDrop {
+  id: number;
+  x: number;
+  y: number;
+  weaponId: PrimaryWeaponId;
 }
 
 export interface TeamScoreHud {
@@ -572,6 +671,144 @@ export interface KillIconPrompt {
   remainingSec: number;
 }
 
+export interface ChaosHudState {
+  phase: 'idle' | 'warning' | 'active' | 'done';
+  eventType: ChaosEventType | null;
+  title: string;
+  subtitle: string;
+  remainingSec: number;
+  warningTimerSec: number;
+}
+
+export interface SubwayTrainHudState {
+  active: boolean;
+  warningTimerSec: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  dir: 1 | -1;
+  carCount: number;
+}
+
+export interface TurretHudState {
+  x: number;
+  y: number;
+  terminalX: number;
+  terminalY: number;
+  ownerTeam: TeamId | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  hackProgress: number; // 0..1
+  hackingPlayerName: string | null;
+  aimAngle: number;
+  muzzleFlashTimer: number;
+}
+
+export interface GlassFloorRenderState {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cracks: number;
+  alive: boolean;
+  respawnTimer: number;
+}
+
+export interface PortalRenderState {
+  id: string;
+  aX: number;
+  aY: number;
+  bX: number;
+  bY: number;
+  radius: number;
+  pulse: number;
+}
+
+export interface JumpPadRenderState {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  compress: number;
+}
+
+export interface WindVentRenderState {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  height: number;
+}
+
+export interface GoldenAirdropHudState {
+  active: boolean;
+  landed: boolean;
+  x: number;
+  y: number;
+}
+
+export interface WallSprayHudState {
+  id: number;
+  x: number;
+  y: number;
+  sprayId: SprayId;
+  ownerName: string;
+  life: number;
+  maxLife: number;
+}
+
+export interface EmotePopupHudState {
+  id: number;
+  fighterId: string;
+  x: number;
+  y: number;
+  emoteId: EmoteId;
+  life: number;
+  maxLife: number;
+}
+
+export interface HologramRenderState {
+  id: number;
+  x: number;
+  y: number;
+  facing: 1 | -1;
+  characterId: CharacterId;
+  outfitId: OutfitId;
+  life: number;
+}
+
+export interface AfterimageRenderState {
+  x: number;
+  y: number;
+  facing: 1 | -1;
+  color: string;
+  alpha: number;
+}
+
+export interface GrappleRenderState {
+  fighterId: string;
+  startX: number;
+  startY: number;
+  anchorX: number;
+  anchorY: number;
+}
+
+export interface BossRaidHudState {
+  bossName: string;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  empCooldownSec: number;
+}
+
+export interface GunGameHudState {
+  leaderName: string;
+  leaderTier: number;
+  maxTiers: number;
+}
+
 export interface HudSnapshot {
   mapId: MapId;
   rules: CustomMatchRules;
@@ -581,6 +818,7 @@ export interface HudSnapshot {
   killFeed: KillFeedItem[];
   pickups: HudPickupMarker[];
   dualWieldDrops: HudDualWieldDrop[];
+  weaponDrops?: HudWeaponDrop[];
   announcer: MultikillAnnouncement | null;
   aimedWalls: AimedWallSnapshot[];
   killIcons?: KillIconPrompt[];
@@ -589,6 +827,13 @@ export interface HudSnapshot {
   domination?: DominationHudState;
   ctf?: CtfHudState;
   koth?: KothHudState;
+  chaos?: ChaosHudState;
+  train?: SubwayTrainHudState;
+  turret?: TurretHudState;
+  airdrop?: GoldenAirdropHudState;
+  earthquakeActive?: boolean;
+  gunGame?: GunGameHudState;
+  bossRaid?: BossRaidHudState;
 }
 
 export interface RemoteInputPacket {
@@ -605,6 +850,11 @@ export interface RemoteInputPacket {
   cycleGrenadeJust: boolean;
   switchSlot?: WeaponSlot;
   aimAngle: number;
+  grapple?: boolean;
+  grappleJust?: boolean;
+  dashDir?: -1 | 0 | 1;
+  emoteJust?: boolean;
+  sprayJust?: boolean;
 }
 
 export interface OnlinePeerMeta {
@@ -619,6 +869,7 @@ export interface OnlinePeerMeta {
   meleeWeapon?: MeleeWeaponId;
   xp: number;
   masteryEquipped?: Partial<Record<WeaponId, WeaponMasteryTier>>;
+  gunWrap?: GunWrapId;
 }
 
 export interface WorldSyncFighter {
@@ -650,6 +901,7 @@ export interface WorldSyncFighter {
   secondaryWeaponId?: SecondaryWeaponId;
   meleeWeaponId?: MeleeWeaponId;
   weaponMastery?: WeaponMasteryTier;
+  gunWrap?: GunWrapId;
   ammo: number;
   isReloading: boolean;
   reloadProgress: number;
@@ -668,6 +920,8 @@ export interface WorldSyncFighter {
   fuelBuffTimer: number;
   shieldHp: number;
   shieldBuffTimer: number;
+  freezeTimer?: number;
+  empDisableTimer?: number;
   grenades?: number;
   grenadeType?: GrenadeType;
   dualWield?: DualWieldType | null;
@@ -678,6 +932,22 @@ export interface WorldSyncFighter {
   kothPoints?: number;
   speechText?: string;
   speechTimer?: number;
+  stunTimer?: number;
+  danceTimer?: number;
+  grappleActive?: boolean;
+  grappleX?: number;
+  grappleY?: number;
+  dashTimer?: number;
+  shrinkTimer?: number;
+  megaSizeTimer?: number;
+  bubbleShieldHp?: number;
+  bubbleShieldTimer?: number;
+  isLastStand?: boolean;
+  lastStandTimer?: number;
+  isVip?: boolean;
+  isBoss?: boolean;
+  gunGameTier?: number;
+  nemesisKillerIds?: string[];
 }
 
 export interface WorldSyncSnapshot {
@@ -696,6 +966,26 @@ export interface WorldSyncSnapshot {
     color: string;
     isRocket: boolean;
     isHoming?: boolean;
+    isChappal?: boolean;
+    stuck?: boolean;
+  }>;
+  cookerBombs?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    fuseTimer: number;
+    maxFuse: number;
+  }>;
+  geometryBeams?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    angle: number;
+    length: number;
+    life: number;
+    maxLife: number;
+    color?: string;
+    isGossip?: boolean;
   }>;
   grenades?: Array<{
     id: number;
@@ -727,7 +1017,21 @@ export interface WorldSyncSnapshot {
     type: DualWieldType;
     life: number;
   }>;
-  barrels: Array<{ id: string; alive: boolean; hitFlashTimer: number }>;
+  weaponDrops?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    weaponId: PrimaryWeaponId;
+    life: number;
+  }>;
+  barrels: Array<{
+    id: string;
+    x?: number;
+    y?: number;
+    launched?: boolean;
+    alive: boolean;
+    hitFlashTimer: number;
+  }>;
   pickups: Array<{ id: string; active: boolean; respawnTimer: number }>;
   tempWalls: Array<{
     id: string;
@@ -749,14 +1053,27 @@ export interface WorldSyncSnapshot {
     id: number;
     x: number;
     y: number;
-    type: PowerUpType;
+    type: AnyPowerUpType;
     life: number;
   }>;
+  chaos?: ChaosHudState;
+  train?: SubwayTrainHudState;
+  turret?: TurretHudState;
+  airdrop?: GoldenAirdropHudState;
+  glassFloors?: GlassFloorRenderState[];
+  collapsedPlatformIds?: string[];
+  wallSprays?: WallSprayHudState[];
+  emotePopups?: EmotePopupHudState[];
+  holograms?: HologramRenderState[];
+  afterimages?: AfterimageRenderState[];
+  earthquakeActive?: boolean;
   teamScores?: TeamScoreHud;
   hardpoint?: HardpointHudState;
   domination?: DominationHudState;
   ctf?: CtfHudState;
   koth?: KothHudState;
+  gunGame?: GunGameHudState;
+  bossRaid?: BossRaidHudState;
   killFeed: KillFeedItem[];
   announcer: MultikillAnnouncement | null;
   events: Array<{
@@ -774,7 +1091,17 @@ export interface WorldSyncSnapshot {
       | 'melee'
       | 'airstrike'
       | 'player_kill'
-      | 'flag_event';
+      | 'flag_event'
+      | 'chaos_warning'
+      | 'train_siren'
+      | 'portal_warp'
+      | 'jump_pad'
+      | 'turret_hack'
+      | 'dash'
+      | 'grapple'
+      | 'emote'
+      | 'spray'
+      | 'nemesis_bounty';
     weaponId?: WeaponId;
     meleeWeaponId?: MeleeWeaponId;
     x?: number;
@@ -799,6 +1126,7 @@ export interface ReplayFighterMeta {
   playerIndex?: PlayerSlotIndex;
   team?: TeamId;
   weaponMastery?: WeaponMasteryTier;
+  gunWrap?: GunWrapId;
 }
 
 export interface ReplayFighterState {
@@ -816,6 +1144,7 @@ export interface ReplayFighterState {
   activeSlot?: WeaponSlot;
   meleeWeaponId?: MeleeWeaponId;
   weaponMastery?: WeaponMasteryTier;
+  gunWrap?: GunWrapId;
   dualWield?: DualWieldType | null;
   ultActiveTimer: number;
   muzzleFlashTimer: number;
@@ -830,8 +1159,25 @@ export interface ReplayFighterState {
   fuelBuffTimer?: number;
   shieldHp?: number;
   shieldBuffTimer?: number;
+  freezeTimer?: number;
+  empDisableTimer?: number;
   speechText?: string;
   speechTimer?: number;
+  stunTimer?: number;
+  danceTimer?: number;
+  grappleActive?: boolean;
+  grappleX?: number;
+  grappleY?: number;
+  dashTimer?: number;
+  shrinkTimer?: number;
+  megaSizeTimer?: number;
+  bubbleShieldHp?: number;
+  bubbleShieldTimer?: number;
+  isLastStand?: boolean;
+  lastStandTimer?: number;
+  isVip?: boolean;
+  isBoss?: boolean;
+  nemesisKillerIds?: string[];
 }
 
 export interface ReplayProjectileState {
@@ -846,6 +1192,8 @@ export interface ReplayProjectileState {
   color: string;
   isRocket: boolean;
   isHoming?: boolean;
+  isChappal?: boolean;
+  stuck?: boolean;
 }
 
 export interface ReplayFrame {
@@ -853,6 +1201,24 @@ export interface ReplayFrame {
   timeRemainingSec: number;
   fighters: ReplayFighterState[];
   projectiles: ReplayProjectileState[];
+  cookerBombs?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    fuseTimer: number;
+    maxFuse: number;
+  }>;
+  geometryBeams?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    angle: number;
+    length: number;
+    life: number;
+    maxLife: number;
+    color?: string;
+    isGossip?: boolean;
+  }>;
   grenades?: Array<{
     id: number;
     type: GrenadeType;
@@ -893,7 +1259,7 @@ export interface ReplayFrame {
     id: number;
     x: number;
     y: number;
-    type: PowerUpType;
+    type: AnyPowerUpType;
     life: number;
   }>;
   dualWieldDrops?: Array<{
@@ -901,6 +1267,13 @@ export interface ReplayFrame {
     x: number;
     y: number;
     type: DualWieldType;
+    life: number;
+  }>;
+  weaponDrops?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    weaponId: PrimaryWeaponId;
     life: number;
   }>;
   floatingTexts: Array<{
@@ -911,6 +1284,16 @@ export interface ReplayFrame {
     life: number;
     maxLife: number;
   }>;
+  chaos?: ChaosHudState;
+  train?: SubwayTrainHudState;
+  turret?: TurretHudState;
+  airdrop?: GoldenAirdropHudState;
+  glassFloors?: GlassFloorRenderState[];
+  collapsedPlatformIds?: string[];
+  wallSprays?: WallSprayHudState[];
+  emotePopups?: EmotePopupHudState[];
+  holograms?: HologramRenderState[];
+  afterimages?: AfterimageRenderState[];
   killFeed: KillFeedItem[];
   announcer: MultikillAnnouncement | null;
 }
@@ -924,4 +1307,36 @@ export interface MatchReplayData {
   killEvents: KillFeedItem[];
   winningKillerId?: string;
   winningVictimId?: string;
+}
+
+export interface TournamentParticipant {
+  id: string;
+  name: string;
+  characterId: CharacterId;
+  outfitId: OutfitId;
+  flameId: FlameColorId;
+  startingWeapon: WeaponId;
+  isHuman: boolean;
+  rankTitle: string;
+  seed: number;
+}
+
+export interface TournamentMatch {
+  id: string;
+  roundIndex: number;
+  matchIndex: number;
+  p1: TournamentParticipant | null;
+  p2: TournamentParticipant | null;
+  winnerId: string | null;
+  scoreLabel?: string;
+}
+
+export interface TournamentBracket {
+  id: string;
+  size: 4 | 8;
+  mapId: MapId;
+  rounds: TournamentMatch[][];
+  currentRoundIndex: number;
+  currentMatchIndex: number;
+  championId: string | null;
 }

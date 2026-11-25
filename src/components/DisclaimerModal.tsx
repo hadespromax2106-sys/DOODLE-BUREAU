@@ -23,14 +23,15 @@ export const DisclaimerModal: React.FC<DisclaimerModalProps> = ({
             </div>
             <div>
               <h2 className="font-display text-2xl tracking-wide text-white leading-none">
-                Copyright &amp; Humor Disclaimer
+                Parody &amp; Fiction Disclaimer
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Doodle Bureau · Fictional Parody Notice · <span className="text-amber-300 font-semibold">made by samarth</span>
+                Doodle Bureau · Fictional Parody Notice ·{' '}
+                <span className="text-amber-300 font-semibold">made by somewhat dead man</span>
               </p>
             </div>
           </div>
-          {!requireAck && onClose && (
+          {onClose && (
             <button
               type="button"
               onClick={onClose}
@@ -47,9 +48,8 @@ export const DisclaimerModal: React.FC<DisclaimerModalProps> = ({
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
             <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
             <p className="text-xs sm:text-sm text-amber-100 font-medium">
-              All characters, caricatures, names, taglines, voice popups, and abilities featured in{' '}
-              <span className="font-bold text-white">Doodle Bureau</span> are purely fictional
-              creations made strictly for humor and lighthearted satire.
+              All characters, weapons, and events in this game are 100% fictional creations by
+              Doodle Bureau for entertainment purposes only.
             </p>
           </div>
 
@@ -57,22 +57,23 @@ export const DisclaimerModal: React.FC<DisclaimerModalProps> = ({
             <p>
               <span className="font-bold text-white">No Real-Life Representation:</span> None of
               the characters in this game represent, impersonate, endorse, or depict any real-life
-              person, public figure, political leader, or organization. Any visual, vocal, or
-              thematic resemblance to any real individual—living or deceased—is strictly coincidental
-              and intended purely for comedic parody.
+              person, public figure, or organization. Any visual, vocal, or thematic resemblance is
+              strictly coincidental and intended purely for lighthearted comedic parody.
             </p>
             <p>
-              <span className="font-bold text-white">Copyright &amp; Fair-Use Parody Notice:</span>{' '}
-              &copy; {new Date().getFullYear()} Doodle Bureau (<span className="font-semibold text-amber-300">made by samarth</span>). All original game artwork, canvas
-              rendering, sound synthesis, and satirical character designs are protected works of
-              comedy and creative parody.
+              <span className="font-bold text-white">Original Creations Notice:</span>{' '}
+              &copy; {new Date().getFullYear()} Doodle Bureau (
+              <span className="font-semibold text-amber-300">made by somewhat dead man</span>). All
+              original game artwork, canvas rendering, 3D lobby models, and synthesized audio are
+              works of creative fiction and comedy.
             </p>
           </div>
 
           <div className="pt-2 flex items-center justify-between gap-3 border-t border-slate-800 flex-wrap">
             <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
               <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
-              Purely fictional humor · <span className="text-amber-300 font-bold">made by samarth</span>
+              100% Fictional Entertainment ·{' '}
+              <span className="text-amber-300 font-bold">made by somewhat dead man</span>
             </span>
             <button
               type="button"
@@ -80,7 +81,7 @@ export const DisclaimerModal: React.FC<DisclaimerModalProps> = ({
               className="flex items-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 text-xs sm:text-sm font-extrabold text-slate-950 hover:bg-amber-400 transition-colors"
             >
               <Check className="h-4 w-4" />
-              {requireAck ? 'I Understand — Enter Doodle Bureau' : 'Close Notice'}
+              {requireAck ? 'Enter Doodle Bureau' : 'Dismiss Notice'}
             </button>
           </div>
         </div>

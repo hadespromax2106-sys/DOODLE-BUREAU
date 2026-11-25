@@ -1,16 +1,20 @@
 import {
+  AnyPowerUpType,
   CharacterId,
   DestructibleWallStyle,
   DualWieldType,
+  EmoteId,
   FlameColorId,
   GrenadeType,
+  GunWrapId,
   KillFeedWeaponId,
   MeleeWeaponId,
   OutfitId,
   PlayerSlotIndex,
-  PowerUpType,
+  PrimaryWeaponId,
   RankDef,
   SecondaryWeaponId,
+  SprayId,
   TeamId,
   WeaponId,
   WeaponMasteryTier,
@@ -61,11 +65,13 @@ export interface FighterEntity {
   secondaryAmmo: number;
   meleeWeaponId: MeleeWeaponId;
   weaponMastery: WeaponMasteryTier;
+  gunWrap: GunWrapId;
   masteryMap?: Partial<Record<WeaponId, WeaponMasteryTier>>;
   ammo: number;
   isReloading: boolean;
   reloadTimerMs: number;
   fireCooldownMs: number;
+  minigunSpinTimer: number;
   burstRemaining: number;
   burstTimerMs: number;
   recoilKick: number;
@@ -103,11 +109,49 @@ export interface FighterEntity {
   shieldHp: number;
   shieldBuffTimer: number;
 
-  // KOTH & Speech Bubble
+  // KOTH & Speech Bubble & Status Effects
   kothPoints: number;
   inPodium: boolean;
   speechText: string;
   speechTimer: number;
+  stunTimer: number;
+  danceTimer: number;
+  freezeTimer: number;
+  empDisableTimer: number;
+  empDotTimer: number;
+  empTickAccum: number;
+  empOwnerId: string | null;
+  slamPending: boolean;
+  gossipCooldown: number;
+
+  // V3.0 Movement, Power-Ups, Last Stand, Modes & Nemesis
+  grappleActive: boolean;
+  grappleX: number;
+  grappleY: number;
+  grappleLen: number;
+  dashTimer: number;
+  dashCooldown: number;
+  dashDir: -1 | 0 | 1;
+  lastTapLeftAt: number;
+  lastTapRightAt: number;
+  shrinkTimer: number;
+  megaSizeTimer: number;
+  bubbleShieldHp: number;
+  bubbleShieldTimer: number;
+  isLastStand: boolean;
+  lastStandTimer: number;
+  isVip: boolean;
+  isBoss: boolean;
+  bossEmpTimer: number;
+  gunGameTier: number;
+  portalCooldown: number;
+  emoteIndex: number;
+  sprayIndex: number;
+  consecutiveDeathsFrom: Record<string, number>;
+  nemesisKillerIds: string[];
+  afterlifeKillsCount: number;
+  nemesisKillsCount: number;
+  nemesisRevengeCoinsEarned: number;
 
   // Stats & Telemetry
   kills: number;
@@ -150,9 +194,45 @@ export interface ProjectileEntity {
   life: number;
   isRocket: boolean;
   isHoming?: boolean;
+  isChappal?: boolean;
+  bouncesLeft?: number;
   targetId?: string | null;
   fromUltimate?: boolean;
   killFeedWeaponOverride?: 'dual_pistols' | 'dual_smgs';
+  noDrop?: boolean;
+  knockback?: number;
+  stickyExplosive?: boolean;
+  stuck?: boolean;
+  stuckTimer?: number;
+  stuckFighterId?: string;
+  stuckOffsetX?: number;
+  stuckOffsetY?: number;
+  freezeDurationSec?: number;
+}
+
+export interface CookerBombEntity {
+  id: number;
+  ownerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  fuseTimer: number;
+  maxFuse: number;
+  whistleTimer: number;
+}
+
+export interface GeometryBeamEntity {
+  id: number;
+  ownerId: string;
+  x: number;
+  y: number;
+  angle: number;
+  length: number;
+  life: number;
+  maxLife: number;
+  color?: string;
+  isGossip?: boolean;
 }
 
 export interface GrenadeEntity {
@@ -209,6 +289,18 @@ export interface DualWieldDropEntity {
   bobPhase: number;
 }
 
+export interface WeaponDropEntity {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  weaponId: PrimaryWeaponId;
+  life: number;
+  maxLife: number;
+  bobPhase: number;
+}
+
 export interface TempWallEntity {
   id: string;
   ownerId: string;
@@ -238,13 +330,20 @@ export interface DestructibleWallEntity {
 
 export interface BarrelEntity {
   id: string;
+  origX: number;
+  origY: number;
   x: number;
   y: number;
+  vx: number;
+  vy: number;
   w: number;
   h: number;
   hp: number;
   maxHp: number;
   alive: boolean;
+  launched: boolean;
+  launcherId: string | null;
+  fuseTimer: number;
   respawnTimer: number;
   hitFlashTimer: number;
 }
@@ -266,10 +365,128 @@ export interface PowerUpDropEntity {
   y: number;
   vx: number;
   vy: number;
-  type: PowerUpType;
+  type: AnyPowerUpType;
   life: number;
   maxLife: number;
   bobPhase: number;
+}
+
+export interface PortalPairEntity {
+  id: string;
+  aX: number;
+  aY: number;
+  bX: number;
+  bY: number;
+  radius: number;
+  pulse: number;
+}
+
+export interface JumpPadEntity {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  compress: number;
+}
+
+export interface WindVentEntity {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  height: number;
+}
+
+export interface SecurityTurretEntity {
+  x: number;
+  y: number;
+  terminalX: number;
+  terminalY: number;
+  ownerTeam: TeamId | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  hackProgress: number;
+  hackingFighterId: string | null;
+  hackingPlayerName: string | null;
+  aimAngle: number;
+  fireCooldown: number;
+  muzzleFlashTimer: number;
+}
+
+export interface GlassFloorEntity {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cracks: number;
+  alive: boolean;
+  respawnTimer: number;
+}
+
+export interface GoldenAirdropEntity {
+  active: boolean;
+  landed: boolean;
+  x: number;
+  y: number;
+  vy: number;
+  life: number;
+}
+
+export interface SubwayTrainEntity {
+  active: boolean;
+  warningTimerSec: number;
+  nextCycleTimerSec: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  vx: number;
+  dir: 1 | -1;
+  carCount: number;
+  hitIds: Set<string>;
+}
+
+export interface HologramCloneEntity {
+  id: number;
+  ownerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  facing: 1 | -1;
+  characterId: CharacterId;
+  outfitId: OutfitId;
+  life: number;
+  fireTimer: number;
+}
+
+export interface WallSprayEntity {
+  id: number;
+  x: number;
+  y: number;
+  sprayId: SprayId;
+  ownerName: string;
+  life: number;
+  maxLife: number;
+}
+
+export interface EmotePopupEntity {
+  id: number;
+  fighterId: string;
+  x: number;
+  y: number;
+  emoteId: EmoteId;
+  life: number;
+  maxLife: number;
+}
+
+export interface AfterimageGhost {
+  x: number;
+  y: number;
+  facing: 1 | -1;
+  color: string;
+  alpha: number;
 }
 
 export interface Particle {

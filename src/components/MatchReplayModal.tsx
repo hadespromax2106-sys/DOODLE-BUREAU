@@ -18,10 +18,12 @@ import {
   AirstrikeBeaconEntity,
   BarrelEntity,
   CameraState,
+  CookerBombEntity,
   DestructibleWallEntity,
   DualWieldDropEntity,
   FighterEntity,
   FloatingText,
+  GeometryBeamEntity,
   GrenadeEntity,
   Particle,
   PickupEntity,
@@ -29,6 +31,7 @@ import {
   ProjectileEntity,
   SmokeCloudEntity,
   TempWallEntity,
+  WeaponDropEntity,
 } from '../game/types';
 import {
   KillFeedItem,
@@ -292,10 +295,12 @@ export const MatchReplayModal: React.FC<MatchReplayModalProps> = ({ replay, onCl
             secondaryAmmo: 15,
             meleeWeaponId: fa?.meleeWeaponId ?? 'knife',
             weaponMastery: fa?.weaponMastery || meta.weaponMastery || 'none',
+            gunWrap: fa?.gunWrap || meta.gunWrap || 'none',
             ammo: 30,
             isReloading: false,
             reloadTimerMs: 0,
             fireCooldownMs: 0,
+            minigunSpinTimer: 0,
             burstRemaining: 0,
             burstTimerMs: 0,
             recoilKick: 0,
@@ -328,6 +333,15 @@ export const MatchReplayModal: React.FC<MatchReplayModalProps> = ({ replay, onCl
             inPodium: false,
             speechText: fa?.speechText ?? '',
             speechTimer: fa?.speechTimer ?? 0,
+            stunTimer: fa?.stunTimer ?? 0,
+            danceTimer: fa?.danceTimer ?? 0,
+            freezeTimer: fa?.freezeTimer ?? 0,
+            empDisableTimer: fa?.empDisableTimer ?? 0,
+            empDotTimer: 0,
+            empTickAccum: 0,
+            empOwnerId: null,
+            slamPending: false,
+            gossipCooldown: 0,
             kills: fa?.kills ?? 0,
             deaths: fa?.deaths ?? 0,
             damageDealt: 0,
@@ -371,8 +385,23 @@ export const MatchReplayModal: React.FC<MatchReplayModalProps> = ({ replay, onCl
             life: 1,
             isRocket: pa.isRocket,
             isHoming: pa.isHoming,
+            isChappal: pa.isChappal,
+            stuck: pa.stuck,
           };
         });
+
+        const cookerBombs: CookerBombEntity[] = (a.cookerBombs || []).map((cb) => ({
+          ...cb,
+          ownerId: '',
+          vx: 0,
+          vy: 0,
+          whistleTimer: 0,
+        }));
+
+        const geometryBeams: GeometryBeamEntity[] = (a.geometryBeams || []).map((bm) => ({
+          ...bm,
+          ownerId: '',
+        }));
 
         const grenades: GrenadeEntity[] = (a.grenades || []).map((g) => ({
           ...g,
@@ -395,6 +424,14 @@ export const MatchReplayModal: React.FC<MatchReplayModalProps> = ({ replay, onCl
           vx: 0,
           vy: 0,
           maxLife: 20,
+          bobPhase: 0,
+        }));
+
+        const weaponDrops: WeaponDropEntity[] = (a.weaponDrops || []).map((wd) => ({
+          ...wd,
+          vx: 0,
+          vy: 0,
+          maxLife: 24,
           bobPhase: 0,
         }));
 
@@ -514,7 +551,7 @@ export const MatchReplayModal: React.FC<MatchReplayModalProps> = ({ replay, onCl
           [],
           a.elapsedSec,
           powerUps,
-          { map, grenades, smokeClouds, airstrikes, dualWieldDrops }
+          { map, grenades, cookerBombs, geometryBeams, smokeClouds, airstrikes, dualWieldDrops, weaponDrops }
         );
 
         uiSyncAcc += dt;

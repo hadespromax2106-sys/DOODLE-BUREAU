@@ -16,6 +16,7 @@ import {
 import {
   CharacterId,
   FlameColorId,
+  GunWrapId,
   OutfitId,
   PartyMember,
   WeaponId,
@@ -33,6 +34,7 @@ interface LobbyStage3DProps {
   flameId: FlameColorId;
   weaponId: WeaponId;
   weaponMastery: WeaponMasteryTier;
+  gunWrap?: GunWrapId;
   partyMembers?: PartyMember[];
   paused?: boolean;
   actionSignal?: LobbyActionSignal | null;
@@ -43,10 +45,18 @@ interface RigRefs {
   bodyPivot: ThreeTypes.Group;
   headGroup: ThreeTypes.Group;
   weaponGroup: ThreeTypes.Group;
+  minigunBarrelSpin?: ThreeTypes.Object3D;
   rightArmGroup: ThreeTypes.Group;
   leftArmGroup: ThreeTypes.Group;
   flameLeft: ThreeTypes.Mesh;
   flameRight: ThreeTypes.Mesh;
+  floatProps: Array<{
+    obj: ThreeTypes.Object3D;
+    baseY: number;
+    speed: number;
+    amp: number;
+    phase: number;
+  }>;
 }
 
 interface SquadSlotEntry {
@@ -96,11 +106,128 @@ function makeEmberGlowTexture(THREE: ThreeModule): ThreeTypes.CanvasTexture {
   return tex;
 }
 
+function makeGunWrapTexture(
+  THREE: ThreeModule,
+  wrapId: GunWrapId
+): ThreeTypes.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  if (wrapId === 'carbon_fiber') {
+    ctx.fillStyle = '#18181B';
+    ctx.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 128; y += 8) {
+      for (let x = 0; x < 128; x += 8) {
+        ctx.fillStyle = ((x + y) / 8) % 2 === 0 ? '#27272A' : '#3F3F46';
+        ctx.fillRect(x, y, 6, 4);
+      }
+    }
+  } else if (wrapId === 'lava_magma') {
+    ctx.fillStyle = '#290808';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = '#F97316';
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 12; i++) {
+      ctx.beginPath();
+      ctx.moveTo((i * 23) % 128, 0);
+      ctx.lineTo(((i * 41 + 30) % 128), 64);
+      ctx.lineTo(((i * 19 + 70) % 128), 128);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#FDE047';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo((i * 31) % 128, 0);
+      ctx.lineTo(((i * 17 + 45) % 128), 128);
+      ctx.stroke();
+    }
+  } else if (wrapId === 'electric_ice') {
+    const grad = ctx.createLinearGradient(0, 0, 128, 128);
+    grad.addColorStop(0, '#0C4A6E');
+    grad.addColorStop(0.5, '#0284C7');
+    grad.addColorStop(1, '#38BDF8');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = '#E0F2FE';
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 10; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, (i * 17) % 128);
+      ctx.lineTo(48, ((i * 29 + 20) % 128));
+      ctx.lineTo(92, ((i * 13 + 50) % 128));
+      ctx.lineTo(128, ((i * 37) % 128));
+      ctx.stroke();
+    }
+  } else if (wrapId === 'comic_halftone') {
+    ctx.fillStyle = '#FACC15';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#EC4899';
+    for (let y = 6; y < 128; y += 12) {
+      for (let x = 6; x < 128; x += 12) {
+        ctx.beginPath();
+        ctx.arc(x + ((y / 12) % 2) * 5, y, 3.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  } else if (wrapId === 'galaxy_void') {
+    const grad = ctx.createRadialGradient(64, 64, 8, 64, 64, 72);
+    grad.addColorStop(0, '#7E22CE');
+    grad.addColorStop(0.55, '#3B0764');
+    grad.addColorStop(1, '#09090B');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 45; i++) {
+      ctx.fillStyle = i % 3 === 0 ? '#E879F9' : '#F8FAFC';
+      ctx.fillRect((i * 37) % 124, (i * 53) % 124, i % 4 === 0 ? 2.5 : 1.5, i % 4 === 0 ? 2.5 : 1.5);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  return tex;
+}
+
 function buildWeaponMaterial(
   THREE: ThreeModule,
   mastery: WeaponMasteryTier,
+  gunWrap: GunWrapId,
   baseHex: number
 ): ThreeTypes.Material {
+  if (gunWrap && gunWrap !== 'none') {
+    if (gunWrap === 'royal_gold') {
+      return new THREE.MeshPhysicalMaterial({
+        color: 0xfbbf24,
+        emissive: 0x92400e,
+        emissiveIntensity: 0.16,
+        metalness: 0.96,
+        roughness: 0.14,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.08,
+      });
+    }
+    const wrapTex = makeGunWrapTexture(THREE, gunWrap);
+    return new THREE.MeshStandardMaterial({
+      map: wrapTex,
+      emissive:
+        gunWrap === 'lava_magma'
+          ? 0x7c2d12
+          : gunWrap === 'electric_ice'
+          ? 0x0369a1
+          : gunWrap === 'galaxy_void'
+          ? 0x4c1d95
+          : 0x000000,
+      emissiveIntensity:
+        gunWrap === 'lava_magma' || gunWrap === 'electric_ice' || gunWrap === 'galaxy_void' ? 0.35 : 0,
+      metalness: gunWrap === 'carbon_fiber' ? 0.55 : gunWrap === 'electric_ice' ? 0.65 : 0.35,
+      roughness: gunWrap === 'carbon_fiber' ? 0.38 : 0.42,
+    });
+  }
   if (mastery === 'gold') {
     return new THREE.MeshPhysicalMaterial({
       color: 0xfacc15,
@@ -139,25 +266,26 @@ function buildWeaponMaterial(
 function build3DWeapon(
   THREE: ThreeModule,
   weaponId: WeaponId,
-  mastery: WeaponMasteryTier
+  mastery: WeaponMasteryTier,
+  gunWrap: GunWrapId = 'none'
 ): ThreeTypes.Group {
   const g = new THREE.Group();
   const def = WEAPONS[weaponId];
-  const primaryMat = buildWeaponMaterial(THREE, mastery, 0x334155);
+  const primaryMat = buildWeaponMaterial(THREE, mastery, gunWrap, 0x334155);
   const darkMetal = new THREE.MeshStandardMaterial({
     color: 0x111827,
     metalness: 0.82,
     roughness: 0.32,
   });
   const gripMat = new THREE.MeshStandardMaterial({
-    color: weaponId === 'ak' && mastery === 'none' ? 0x7c2d12 : 0x1e293b,
+    color: (weaponId === 'ak' || weaponId === 'boomstick') && mastery === 'none' && gunWrap === 'none' ? 0x7c2d12 : 0x1e293b,
     metalness: 0.15,
     roughness: 0.72,
   });
   const accentMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(def.bulletColor),
     emissive: new THREE.Color(def.bulletColor),
-    emissiveIntensity: mastery === 'diamond' ? 0.9 : 0.45,
+    emissiveIntensity: mastery === 'diamond' || gunWrap === 'electric_ice' || gunWrap === 'lava_magma' ? 0.9 : 0.45,
     metalness: 0.4,
     roughness: 0.25,
   });
@@ -182,6 +310,149 @@ function build3DWeapon(
     const handle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.2, 0.07), gripMat);
     handle.position.set(-0.08, -0.1, 0);
     g.add(handle);
+    return g;
+  }
+
+  if (weaponId === 'minigun') {
+    const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.44, 16), primaryMat);
+    housing.rotation.z = Math.PI / 2;
+    housing.position.set(-0.06, 0.02, 0);
+    housing.castShadow = true;
+    g.add(housing);
+
+    const handleTop = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.055, 0.06), darkMetal);
+    handleTop.position.set(-0.04, 0.19, 0);
+    g.add(handleTop);
+    [-0.16, 0.08].forEach((hx) => {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.05), darkMetal);
+      strut.position.set(hx, 0.13, 0);
+      g.add(strut);
+    });
+
+    const ammoDrum = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.22, 14), accentMat);
+    ammoDrum.position.set(0.02, -0.14, 0.09);
+    g.add(ammoDrum);
+
+    const spinGroup = new THREE.Group();
+    spinGroup.position.set(0.46, 0.02, 0);
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2;
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.62, 8), darkMetal);
+      b.rotation.z = Math.PI / 2;
+      b.position.set(0, Math.cos(ang) * 0.058, Math.sin(ang) * 0.058);
+      spinGroup.add(b);
+    }
+    const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.082, 0.06, 14), primaryMat);
+    clamp.rotation.z = Math.PI / 2;
+    clamp.position.set(0.18, 0, 0);
+    spinGroup.add(clamp);
+    g.add(spinGroup);
+    g.userData.spinGroup = spinGroup;
+    return g;
+  }
+
+  if (weaponId === 'crossbow_launcher') {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.08, 0.08), primaryMat);
+    rail.position.set(0.1, 0.02, 0);
+    rail.castShadow = true;
+    g.add(rail);
+
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.07), gripMat);
+    stock.position.set(-0.34, -0.02, 0);
+    g.add(stock);
+
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.06), gripMat);
+    grip.position.set(-0.14, -0.11, 0);
+    grip.rotation.z = 0.2;
+    g.add(grip);
+
+    [-1, 1].forEach((side) => {
+      const limb = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.36), darkMetal);
+      limb.position.set(0.36, 0.03, side * 0.19);
+      limb.rotation.y = side * -0.45;
+      g.add(limb);
+      const stringSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.34, 6), accentMat);
+      stringSeg.rotation.x = Math.PI / 2;
+      stringSeg.position.set(0.2, 0.04, side * 0.17);
+      stringSeg.rotation.z = side * 0.6;
+      g.add(stringSeg);
+    });
+
+    const boltShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.42, 8), darkMetal);
+    boltShaft.rotation.z = Math.PI / 2;
+    boltShaft.position.set(0.32, 0.07, 0);
+    g.add(boltShaft);
+
+    const warhead = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.11, 10), accentMat);
+    warhead.rotation.z = -Math.PI / 2;
+    warhead.position.set(0.56, 0.07, 0);
+    g.add(warhead);
+    return g;
+  }
+
+  if (weaponId === 'plasma_repeater' || weaponId === 'freeze_ray') {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.14, 0.11), primaryMat);
+    body.castShadow = true;
+    g.add(body);
+
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.11, 0.08), gripMat);
+    stock.position.set(-0.38, -0.02, 0);
+    g.add(stock);
+
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.16, 0.065), gripMat);
+    grip.position.set(-0.14, -0.12, 0);
+    grip.rotation.z = 0.22;
+    g.add(grip);
+
+    const energyCore = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.055, 0.055, 0.28, 12),
+      accentMat
+    );
+    energyCore.rotation.z = Math.PI / 2;
+    energyCore.position.set(0.06, 0.08, 0);
+    g.add(energyCore);
+
+    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.085), darkMetal);
+    shroud.position.set(0.42, 0.02, 0);
+    g.add(shroud);
+
+    const nozzle = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        weaponId === 'freeze_ray' ? 0.062 : 0.04,
+        weaponId === 'freeze_ray' ? 0.036 : 0.048,
+        0.14,
+        12
+      ),
+      accentMat
+    );
+    nozzle.rotation.z = Math.PI / 2;
+    nozzle.position.set(0.67, 0.02, 0);
+    g.add(nozzle);
+    return g;
+  }
+
+  if (weaponId === 'boomstick') {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.11), primaryMat);
+    body.castShadow = true;
+    g.add(body);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.08), gripMat);
+    stock.position.set(-0.3, -0.04, 0);
+    stock.rotation.z = 0.18;
+    g.add(stock);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.065), gripMat);
+    grip.position.set(-0.13, -0.1, 0);
+    grip.rotation.z = 0.24;
+    g.add(grip);
+    [-0.03, 0.03].forEach((bz) => {
+      const dblBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.03, 0.56, 10), darkMetal);
+      dblBarrel.rotation.z = Math.PI / 2;
+      dblBarrel.position.set(0.42, 0.025, bz);
+      dblBarrel.castShadow = true;
+      g.add(dblBarrel);
+    });
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.022, 0.095), accentMat);
+    rib.position.set(0.38, 0.06, 0);
+    g.add(rib);
     return g;
   }
 
@@ -319,6 +590,7 @@ function build3DCharacterRig(
     flameId: FlameColorId;
     weaponId: WeaponId;
     weaponMastery: WeaponMasteryTier;
+    gunWrap?: GunWrapId;
   }
 ): RigRefs {
   const charDef = CHARACTERS.find((c) => c.id === opts.characterId) || CHARACTERS[0];
@@ -330,14 +602,22 @@ function build3DCharacterRig(
   const suitHex = useCustomOutfit ? outfit.primaryColor : charDef.defaultSuitColor;
   const accentHex = useCustomOutfit ? outfit.secondaryColor : charDef.tieColor;
   const pantsHex =
-    charDef.id === 'revolutionary' && !useCustomOutfit
-      ? '#1D4ED8'
-      : charDef.id === 'thongi_baba' && !useCustomOutfit
+    charDef.id === 'thongi_baba' && !useCustomOutfit
       ? '#312E81'
-      : charDef.id === 'yogi_boy' && !useCustomOutfit
-      ? '#C2410C'
-      : charDef.id === 'mitron' && !useCustomOutfit
+      : charDef.id === 'chai_storm' && !useCustomOutfit
       ? '#FEF3C7'
+      : charDef.id === 'baron_voltage' && !useCustomOutfit
+      ? '#1E293B'
+      : charDef.id === 'baba_wifi' && !useCustomOutfit
+      ? '#C2410C'
+      : charDef.id === 'captain_jalebi' && !useCustomOutfit
+      ? '#1E293B'
+      : charDef.id === 'prof_jugaad' && !useCustomOutfit
+      ? '#334155'
+      : charDef.id === 'chappal_ninja' && !useCustomOutfit
+      ? '#9D174D'
+      : charDef.id === 'bhaijaan_gymbro' && !useCustomOutfit
+      ? '#09090B'
       : suitHex;
 
   const skinMat = new THREE.MeshStandardMaterial({
@@ -366,7 +646,16 @@ function build3DCharacterRig(
     metalness: 0.16,
   });
   const bootMat = new THREE.MeshStandardMaterial({
-    color: 0x0f172a,
+    color:
+      charDef.id === 'captain_jalebi'
+        ? 0x22d3ee
+        : charDef.id === 'baba_wifi'
+        ? 0xfb923c
+        : charDef.id === 'baron_voltage'
+        ? 0x1e3a8a
+        : 0x0f172a,
+    emissive: charDef.id === 'captain_jalebi' ? 0x0891b2 : 0x000000,
+    emissiveIntensity: charDef.id === 'captain_jalebi' ? 0.6 : 0,
     roughness: 0.45,
     metalness: 0.35,
   });
@@ -374,19 +663,32 @@ function build3DCharacterRig(
   const root = new THREE.Group();
   const bodyPivot = new THREE.Group();
   root.add(bodyPivot);
+  const floatProps: RigRefs['floatProps'] = [];
 
-  // Boots + Legs (grounded cleanly at y = 0)
+  const isGymBro = charDef.id === 'bhaijaan_gymbro';
+  const isWifi = charDef.id === 'baba_wifi';
+
+  // Boots + Legs (grounded cleanly at y = 0; Bhaijaan gets comically tiny legs; Baba Wi-Fi gets levitating sandals!)
+  const legRadius = isGymBro ? 0.068 : 0.115;
   const legGeo = isSteve
     ? new THREE.BoxGeometry(0.24, 0.72, 0.24)
-    : new THREE.CylinderGeometry(0.115, 0.105, 0.72, 14);
-  const bootGeo = new THREE.BoxGeometry(0.25, 0.14, 0.31);
+    : new THREE.CylinderGeometry(legRadius, legRadius * 0.9, 0.72, 14);
+  const bootGeo = isGymBro
+    ? new THREE.BoxGeometry(0.18, 0.12, 0.24)
+    : isWifi
+    ? new THREE.BoxGeometry(0.22, 0.06, 0.3)
+    : new THREE.BoxGeometry(0.25, 0.14, 0.31);
 
-  [-0.17, 0.17].forEach((lx) => {
+  [-0.17, 0.17].forEach((lx, legIdx) => {
     const boot = new THREE.Mesh(bootGeo, bootMat);
-    boot.position.set(lx, 0.07, 0.03);
+    const bootBaseY = isWifi ? 0.14 : 0.07;
+    boot.position.set(lx, bootBaseY, 0.03);
     boot.castShadow = true;
     boot.receiveShadow = true;
     bodyPivot.add(boot);
+    if (isWifi) {
+      floatProps.push({ obj: boot, baseY: bootBaseY, speed: 3.2, amp: 0.04, phase: legIdx * 1.4 });
+    }
 
     const leg = new THREE.Mesh(legGeo, pantsMat);
     leg.position.set(lx, 0.49, 0);
@@ -394,9 +696,15 @@ function build3DCharacterRig(
     bodyPivot.add(leg);
   });
 
-  // Torso
+  // Torso (Bhaijaan Gymbro gets massive muscular upper body; Baron Voltage gets broad armored mantle; General Noodle gets puffy parka)
   const torsoGeo = isSteve
     ? new THREE.BoxGeometry(0.62, 0.78, 0.36)
+    : isGymBro
+    ? new THREE.CylinderGeometry(0.46, 0.24, 0.84, 16)
+    : charDef.id === 'baron_voltage'
+    ? new THREE.CylinderGeometry(0.35, 0.32, 0.82, 16)
+    : charDef.id === 'general_noodle'
+    ? new THREE.CylinderGeometry(0.36, 0.39, 0.82, 16)
     : new THREE.CylinderGeometry(0.28, 0.31, 0.78, 16);
   const torso = new THREE.Mesh(torsoGeo, suitMat);
   torso.position.set(0, 1.24, 0);
@@ -404,77 +712,253 @@ function build3DCharacterRig(
   torso.receiveShadow = true;
   bodyPivot.add(torso);
 
-  // Character-specific outfit details
-  if (charDef.id === 'mitron') {
-    // Cream kurta center & Nehru jacket lapel
-    const kurta = new THREE.Mesh(
-      new THREE.BoxGeometry(0.24, 0.74, 0.37),
-      new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.65 })
-    );
-    kurta.position.set(0, 1.24, 0.01);
-    bodyPivot.add(kurta);
-    const jacketLeft = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.76, 0.38), suitMat);
-    jacketLeft.position.set(-0.2, 1.24, 0.01);
-    bodyPivot.add(jacketLeft);
-    const jacketRight = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.76, 0.38), suitMat);
-    jacketRight.position.set(0.2, 1.24, 0.01);
-    bodyPivot.add(jacketRight);
-  } else if (charDef.id === 'tariff_boss' || charDef.id === 'dashing_trudeau') {
-    const shirt = new THREE.Mesh(
-      new THREE.BoxGeometry(0.2, 0.48, 0.32),
-      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.55 })
-    );
-    shirt.position.set(0, 1.38, 0.04);
-    bodyPivot.add(shirt);
+  // Neon Cyber outfit cyan glow accents
+  if (opts.outfitId === 'neon_cyber') {
+    const cyberMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 1.4,
+      roughness: 0.2,
+    });
+    const chestLine = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.36), cyberMat);
+    chestLine.position.set(0, 1.38, 0.04);
+    bodyPivot.add(chestLine);
+    const beltLine = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.04, 0.36), cyberMat);
+    beltLine.position.set(0, 0.94, 0.02);
+    bodyPivot.add(beltLine);
+  }
 
-    const tieLen = charDef.id === 'tariff_boss' ? 0.72 : 0.5;
-    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.085, tieLen, 0.04), accentMat);
-    tie.position.set(0, 1.56 - tieLen * 0.5, 0.21);
-    tie.castShadow = true;
-    bodyPivot.add(tie);
-  } else if (charDef.id === 'yogi_boy') {
-    const sash = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.14, 0.38), accentMat);
+  // Character-specific outfit details & silhouette props
+  if (charDef.id === 'chai_storm') {
+    const shirt = new THREE.Mesh(
+      new THREE.BoxGeometry(0.24, 0.74, 0.37),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.65 })
+    );
+    shirt.position.set(0, 1.24, 0.02);
+    bodyPivot.add(shirt);
+    const vestL = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.72, 0.39), suitMat);
+    vestL.position.set(-0.2, 1.24, 0.01);
+    bodyPivot.add(vestL);
+    const vestR = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.72, 0.39), suitMat);
+    vestR.position.set(0.2, 1.24, 0.01);
+    bodyPivot.add(vestR);
+    // Steel chai tumbler on belt
+    const tumbler = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.085, 0.065, 0.2, 12),
+      new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.88, roughness: 0.18 })
+    );
+    tumbler.position.set(0.31, 0.96, 0.2);
+    tumbler.castShadow = true;
+    bodyPivot.add(tumbler);
+  } else if (charDef.id === 'baron_voltage') {
+    // Crimson-and-charcoal cloak with circuit-board cyan trim + brass chest arc core
+    const charcoalCloakMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.72 });
+    const brassArmorMat = new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.84, roughness: 0.26 });
+    const circuitGlowMat = new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 1.6,
+      roughness: 0.2,
+    });
+    const cloakBack = new THREE.Mesh(new THREE.BoxGeometry(0.76, 1.02, 0.12), suitMat);
+    cloakBack.position.set(0, 1.06, -0.34);
+    cloakBack.rotation.x = 0.1;
+    cloakBack.castShadow = true;
+    bodyPivot.add(cloakBack);
+    const cloakTrim = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.06, 0.13), circuitGlowMat);
+    cloakTrim.position.set(0, 0.62, -0.38);
+    bodyPivot.add(cloakTrim);
+    [-0.36, 0.36].forEach((sx) => {
+      const pauldron = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 10), charcoalCloakMat);
+      pauldron.scale.set(1.1, 0.75, 1.0);
+      pauldron.position.set(sx, 1.58, 0);
+      bodyPivot.add(pauldron);
+    });
+    const reactorRing = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.03, 10, 20), brassArmorMat);
+    reactorRing.position.set(0, 1.36, 0.33);
+    bodyPivot.add(reactorRing);
+    const reactorCore = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), circuitGlowMat);
+    reactorCore.position.set(0, 1.36, 0.33);
+    bodyPivot.add(reactorCore);
+    const circuitLine = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.03, 0.34), circuitGlowMat);
+    circuitLine.position.set(0, 1.04, 0.04);
+    bodyPivot.add(circuitLine);
+  } else if (charDef.id === 'captain_jalebi') {
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.76, 0.34), accentMat);
+    stripe.position.set(0, 1.24, 0.14);
+    bodyPivot.add(stripe);
+    // Swirling pretzel-shaped cape
+    const capeMat = new THREE.MeshStandardMaterial({
+      color: 0xf97316,
+      emissive: 0xea580c,
+      emissiveIntensity: 0.35,
+      roughness: 0.4,
+      side: THREE.DoubleSide,
+    });
+    const cape = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.075, 10, 28), capeMat);
+    cape.position.set(0, 1.18, -0.36);
+    cape.rotation.x = 0.22;
+    bodyPivot.add(cape);
+  } else if (charDef.id === 'baba_wifi') {
+    const sash = new THREE.Mesh(
+      new THREE.BoxGeometry(0.62, 0.14, 0.38),
+      new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x06b6d4, emissiveIntensity: 0.9 })
+    );
     sash.position.set(0, 1.24, 0.01);
     sash.rotation.z = 0.52;
     bodyPivot.add(sash);
-  } else if (charDef.id === 'red_dragon') {
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.11, 14), suitMat);
-    collar.position.set(0, 1.64, 0);
-    bodyPivot.add(collar);
-    const pin = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.045, 0.045, 0.025, 12),
-      new THREE.MeshStandardMaterial({
-        color: 0xdc2626,
-        emissive: 0x991b1b,
-        emissiveIntensity: 0.4,
-        metalness: 0.5,
-      })
+  } else if (charDef.id === 'general_noodle') {
+    const furCollar = new THREE.Mesh(
+      new THREE.TorusGeometry(0.32, 0.09, 10, 20),
+      new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.88 })
     );
-    pin.rotation.x = Math.PI / 2;
-    pin.position.set(0.14, 1.38, 0.28);
-    bodyPivot.add(pin);
-  } else if (charDef.id === 'iron_bear') {
-    [-0.31, 0.31].forEach((sx) => {
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.34), accentMat);
-      pad.position.set(sx, 1.55, 0);
-      bodyPivot.add(pad);
+    furCollar.rotation.x = Math.PI / 2;
+    furCollar.position.set(0, 1.62, 0);
+    bodyPivot.add(furCollar);
+    // Two mini paper-lantern drones hovering over his shoulders
+    [-0.58, 0.58].forEach((dx, dIdx) => {
+      const drone = new THREE.Group();
+      drone.position.set(dx, 1.88, 0.06);
+      const lantern = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 12, 10),
+        new THREE.MeshStandardMaterial({
+          color: 0xef4444,
+          emissive: 0xdc2626,
+          emissiveIntensity: 1.1,
+          roughness: 0.35,
+        })
+      );
+      lantern.scale.set(1, 1.2, 1);
+      drone.add(lantern);
+      const cap = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.08, 0.04, 10),
+        new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.85, roughness: 0.2 })
+      );
+      cap.position.y = 0.13;
+      drone.add(cap);
+      bodyPivot.add(drone);
+      floatProps.push({ obj: drone, baseY: 1.88, speed: 2.8, amp: 0.075, phase: dIdx * 2.1 });
     });
+  } else if (charDef.id === 'agent_404') {
+    // Trench coat skirt flare & upturned collar
+    const coatSkirt = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.42, 16), suitMat);
+    coatSkirt.position.set(0, 0.78, 0);
+    bodyPivot.add(coatSkirt);
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.04), accentMat);
+    tie.position.set(0, 1.32, 0.31);
+    bodyPivot.add(tie);
+  } else if (charDef.id === 'prof_jugaad') {
+    // Duct-tape strips on lab coat
+    const tapeMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.55, roughness: 0.35 });
+    const tape1 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.07, 0.34), tapeMat);
+    tape1.position.set(-0.08, 1.32, 0.14);
+    tape1.rotation.z = 0.35;
+    bodyPivot.add(tape1);
+    const tape2 = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.07, 0.34), tapeMat);
+    tape2.position.set(0.12, 1.1, 0.14);
+    tape2.rotation.z = -0.28;
+    bodyPivot.add(tape2);
+  } else if (charDef.id === 'chappal_ninja') {
+    // Utility belt + golden winged slipper strapped to back
+    const belt = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32, 0.32, 0.09, 16),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4 })
+    );
+    belt.position.set(0, 0.94, 0);
+    bodyPivot.add(belt);
+    const buckle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.11, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0xfbbf24, metalness: 0.9, roughness: 0.2 })
+    );
+    buckle.position.set(0, 0.94, 0.32);
+    bodyPivot.add(buckle);
+    const slipper = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.46, 0.08),
+      new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xd97706, emissiveIntensity: 0.5, metalness: 0.65 })
+    );
+    slipper.position.set(0.22, 1.54, -0.42);
+    slipper.rotation.z = -0.45;
+    bodyPivot.add(slipper);
+  } else if (charDef.id === 'dj_dholak') {
+    // Portable Dhol Drum strapped across chest
+    const dhol = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.17, 0.44, 14),
+      new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.45 })
+    );
+    dhol.rotation.z = Math.PI / 2 - 0.18;
+    dhol.position.set(0, 1.16, 0.34);
+    dhol.castShadow = true;
+    bodyPivot.add(dhol);
+    [-0.22, 0.22].forEach((hx) => {
+      const head = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.175, 0.175, 0.03, 14),
+        new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.6 })
+      );
+      head.rotation.z = Math.PI / 2 - 0.18;
+      head.position.set(hx, 1.16 + hx * 0.18, 0.34);
+      bodyPivot.add(head);
+    });
+  } else if (charDef.id === 'aunty_cctv') {
+    // Binoculars hanging around neck
+    const binoMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.75, roughness: 0.25 });
+    [-0.09, 0.09].forEach((bx) => {
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.18, 10), binoMat);
+      lens.rotation.x = Math.PI / 2.6;
+      lens.position.set(bx, 1.38, 0.33);
+      bodyPivot.add(lens);
+    });
+  } else if (charDef.id === 'bhaijaan_gymbro') {
+    // Giant bicep spheres on shoulders
+    [-0.46, 0.46].forEach((bx) => {
+      const delt = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), skinMat);
+      delt.position.set(bx, 1.54, 0.02);
+      bodyPivot.add(delt);
+    });
+  } else if (charDef.id === 'exam_topper') {
+    // Gold medals on blazer + glowing yellow ruler sword on back
+    const medalMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.92, roughness: 0.18 });
+    [
+      [-0.14, 1.44],
+      [-0.14, 1.3],
+      [0.14, 1.44],
+    ].forEach(([mx, my]) => {
+      const medal = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.025, 12), medalMat);
+      medal.rotation.x = Math.PI / 2;
+      medal.position.set(mx, my, 0.31);
+      bodyPivot.add(medal);
+    });
+    const ruler = new THREE.Mesh(
+      new THREE.BoxGeometry(0.11, 0.9, 0.04),
+      new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.35 })
+    );
+    ruler.position.set(0.24, 1.66, -0.42);
+    ruler.rotation.z = -0.38;
+    bodyPivot.add(ruler);
   } else if (isSteve) {
-    // Steve neckline V-notch
     const neckPatch = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.11, 0.04), skinMat);
     neckPatch.position.set(0, 1.57, 0.175);
     bodyPivot.add(neckPatch);
   }
 
-  // Jetpack Thruster Pack on Back
+  // Jetpack Thruster Pack on Back (custom DIY soda-cooker pack for Prof Jugaad, protein shaker pack for Bhaijaan, textbook pack for Exam Topper!)
   const jetpack = new THREE.Group();
   jetpack.position.set(0, 1.28, -0.32);
   const packMat = new THREE.MeshStandardMaterial({
-    color: 0x1e293b,
-    metalness: 0.72,
-    roughness: 0.32,
+    color:
+      charDef.id === 'exam_topper'
+        ? 0x7c2d12
+        : charDef.id === 'bhaijaan_gymbro'
+        ? 0x0891b2
+        : 0x1e293b,
+    metalness: charDef.id === 'exam_topper' ? 0.15 : 0.72,
+    roughness: charDef.id === 'exam_topper' ? 0.72 : 0.32,
   });
-  const packCore = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.46, 0.18), packMat);
+  const packCore = new THREE.Mesh(
+    charDef.id === 'prof_jugaad'
+      ? new THREE.CylinderGeometry(0.2, 0.22, 0.38, 14)
+      : new THREE.BoxGeometry(0.42, 0.46, 0.18),
+    packMat
+  );
   packCore.castShadow = true;
   jetpack.add(packCore);
 
@@ -488,7 +972,11 @@ function build3DCharacterRig(
   });
 
   const makeThrusterPod = (xPos: number) => {
-    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.095, 0.42, 12), packMat);
+    const podColor =
+      charDef.id === 'prof_jugaad'
+        ? new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.25, metalness: 0.2 })
+        : packMat;
+    const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.095, 0.42, 12), podColor);
     pod.position.set(xPos, -0.02, -0.04);
     pod.castShadow = true;
     jetpack.add(pod);
@@ -645,22 +1133,83 @@ function build3DCharacterRig(
     nose.position.set(0, -0.02, 0.41);
     headGroup.add(nose);
 
-    // Eyes / Shades
-    if (charDef.id === 'iron_bear') {
-      const shadeMat = new THREE.MeshPhysicalMaterial({
-        color: 0x09090b,
-        metalness: 0.7,
+    // Eyes / Shades / Visors
+    if (charDef.id === 'baron_voltage') {
+      // Riveted brass & cobalt-blue iron faceplate with glowing cyan eye slits
+      const cobaltPlateMat = new THREE.MeshStandardMaterial({
+        color: 0x1e3a8a,
+        metalness: 0.82,
+        roughness: 0.26,
+      });
+      const brassPlateMat = new THREE.MeshStandardMaterial({
+        color: 0xd97706,
+        metalness: 0.88,
+        roughness: 0.22,
+      });
+      const cyanEyeMat = new THREE.MeshStandardMaterial({
+        color: 0x67e8f9,
+        emissive: 0x22d3ee,
+        emissiveIntensity: 2.0,
         roughness: 0.1,
-        clearcoat: 1.0,
+      });
+      const maskBase = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.66, 0.28), cobaltPlateMat);
+      maskBase.position.set(0, 0.02, 0.28);
+      headGroup.add(maskBase);
+      const cheekGuard = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.26, 0.22), brassPlateMat);
+      cheekGuard.position.set(0, -0.17, 0.34);
+      headGroup.add(cheekGuard);
+      [-0.24, 0.24].forEach((rx) => {
+        const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 8), brassPlateMat);
+        rivet.rotation.x = Math.PI / 2;
+        rivet.position.set(rx, 0.22, 0.43);
+        headGroup.add(rivet);
       });
       [-0.14, 0.14].forEach((ex) => {
-        const lens = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.06), shadeMat);
-        lens.position.set(ex, 0.06, 0.38);
+        const slit = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.055, 0.05), cyanEyeMat);
+        slit.position.set(ex, 0.08, 0.42);
+        slit.rotation.z = ex < 0 ? -0.15 : 0.15;
+        headGroup.add(slit);
+      });
+    } else if (charDef.id === 'baba_wifi') {
+      const visor = new THREE.Mesh(
+        new THREE.BoxGeometry(0.56, 0.15, 0.16),
+        new THREE.MeshStandardMaterial({
+          color: 0x0f172a,
+          emissive: 0x06b6d4,
+          emissiveIntensity: 0.85,
+          metalness: 0.85,
+          roughness: 0.15,
+        })
+      );
+      visor.position.set(0, 0.06, 0.36);
+      headGroup.add(visor);
+    } else if (charDef.id === 'agent_404') {
+      const nvgMat = new THREE.MeshStandardMaterial({
+        color: 0x22c55e,
+        emissive: 0x16a34a,
+        emissiveIntensity: 1.4,
+        roughness: 0.2,
+      });
+      [-0.13, 0.13].forEach((ex) => {
+        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.12, 12), nvgMat);
+        tube.rotation.x = Math.PI / 2;
+        tube.position.set(ex, 0.06, 0.41);
+        headGroup.add(tube);
+      });
+    } else if (charDef.id === 'dj_dholak') {
+      [-0.14, 0.14].forEach((ex, i) => {
+        const lens = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.1, 0.06),
+          new THREE.MeshStandardMaterial({
+            color: i === 0 ? 0x22d3ee : 0xf472b6,
+            emissive: i === 0 ? 0x06b6d4 : 0xdb2777,
+            emissiveIntensity: 0.8,
+            roughness: 0.2,
+          })
+        );
+        lens.position.set(ex, 0.06, 0.39);
         headGroup.add(lens);
       });
-      const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.05), shadeMat);
-      bridge.position.set(0, 0.08, 0.39);
-      headGroup.add(bridge);
     } else {
       [-0.135, 0.135].forEach((ex) => {
         const eye = new THREE.Mesh(new THREE.SphereGeometry(0.068, 12, 10), whiteMat);
@@ -671,93 +1220,204 @@ function build3DCharacterRig(
         headGroup.add(pupil);
       });
 
-      if (charDef.id === 'mitron') {
+      if (charDef.id === 'chai_storm' || charDef.id === 'exam_topper' || charDef.id === 'aunty_cctv') {
         const rimMat = new THREE.MeshStandardMaterial({
-          color: 0xe2e8f0,
-          metalness: 0.9,
+          color: charDef.id === 'chai_storm' ? 0x1e293b : 0x0f172a,
+          metalness: 0.85,
           roughness: 0.15,
         });
+        const rSize = charDef.id === 'chai_storm' ? 0.11 : 0.088;
         [-0.135, 0.135].forEach((ex) => {
-          const rim = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.012, 8, 18), rimMat);
-          rim.position.set(ex, 0.055, 0.41);
+          const rim = new THREE.Mesh(new THREE.TorusGeometry(rSize, 0.015, 8, 18), rimMat);
+          rim.position.set(ex, 0.055, 0.415);
           headGroup.add(rim);
         });
-        const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.015, 0.02), rimMat);
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.016, 0.02), rimMat);
         bridge.position.set(0, 0.065, 0.415);
         headGroup.add(bridge);
       }
     }
 
-    // Character Hairstyles, Beard & Tilak
-    if (charDef.id === 'mitron') {
-      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.43, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat);
-      hair.position.set(0, 0.04, -0.02);
+    // Character Hairstyles, Mustaches, Antennas & Headgear
+    if (charDef.id === 'chai_storm') {
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.43, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat);
+      hair.position.set(0, 0.05, -0.02);
       hair.rotation.x = -0.2;
       headGroup.add(hair);
-
-      const beard = new THREE.Mesh(new THREE.SphereGeometry(0.37, 18, 14, 0, Math.PI * 2, Math.PI * 0.45, Math.PI * 0.55), hairMat);
-      beard.position.set(0, -0.1, 0.07);
-      beard.scale.set(1.02, 1.05, 0.95);
-      headGroup.add(beard);
-    } else if (charDef.id === 'tariff_boss') {
-      const sweep = new THREE.Mesh(new THREE.SphereGeometry(0.44, 18, 14), hairMat);
-      sweep.scale.set(1.04, 0.56, 1.15);
-      sweep.position.set(0.02, 0.34, 0.05);
-      sweep.rotation.z = -0.18;
-      headGroup.add(sweep);
-    } else if (charDef.id === 'revolutionary') {
-      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.43, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.52), hairMat);
+      // Wild mustache
+      const stache = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.09, 0.1), hairMat);
+      stache.position.set(0, -0.1, 0.4);
+      headGroup.add(stache);
+    } else if (charDef.id === 'baron_voltage') {
+      // Crimson-and-charcoal cowl hood + side voltage fins
+      const hoodTop = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        suitMat
+      );
+      hoodTop.position.set(0, 0.08, -0.05);
+      hoodTop.rotation.x = -0.22;
+      headGroup.add(hoodTop);
+      const cowlTrim = new THREE.Mesh(
+        new THREE.TorusGeometry(0.45, 0.045, 10, 24),
+        new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x06b6d4, emissiveIntensity: 1.3 })
+      );
+      cowlTrim.position.set(0, 0.05, 0.14);
+      headGroup.add(cowlTrim);
+      [-0.45, 0.45].forEach((fx) => {
+        const fin = new THREE.Mesh(
+          new THREE.ConeGeometry(0.08, 0.34, 6),
+          new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.85, roughness: 0.25 })
+        );
+        fin.position.set(fx, 0.18, 0);
+        fin.rotation.z = fx < 0 ? 0.55 : -0.55;
+        headGroup.add(fin);
+      });
+    } else if (charDef.id === 'captain_jalebi') {
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.43, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat);
+      hair.position.set(0, 0.05, -0.02);
+      headGroup.add(hair);
+      const headband = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.435, 0.435, 0.1, 20),
+        new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 0.3 })
+      );
+      headband.position.set(0, 0.19, 0);
+      headGroup.add(headband);
+    } else if (charDef.id === 'baba_wifi') {
+      // Floating glowing Wi-Fi antenna above head
+      const antenna = new THREE.Group();
+      antenna.position.set(0, 0.56, 0);
+      const mast = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, 0.24, 10),
+        new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x06b6d4, emissiveIntensity: 1.2 })
+      );
+      antenna.add(mast);
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.065, 12, 10),
+        new THREE.MeshStandardMaterial({ color: 0x67e8f9, emissive: 0x22d3ee, emissiveIntensity: 1.8 })
+      );
+      orb.position.y = 0.15;
+      antenna.add(orb);
+      headGroup.add(antenna);
+      floatProps.push({ obj: antenna, baseY: 0.56, speed: 3.6, amp: 0.055, phase: 0.5 });
+    } else if (charDef.id === 'general_noodle') {
+      const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.445, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.48), hairMat);
+      bowl.position.set(0, 0.05, 0);
+      headGroup.add(bowl);
+    } else if (charDef.id === 'agent_404') {
+      // Fedora hat pulled low + stick-on mustache
+      const hatMat = new THREE.MeshStandardMaterial({ color: 0x292524, roughness: 0.65 });
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.56, 0.04, 20), hatMat);
+      brim.position.set(0, 0.28, 0.04);
+      brim.rotation.x = 0.14;
+      headGroup.add(brim);
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.37, 0.26, 18), hatMat);
+      crown.position.set(0, 0.42, 0.02);
+      crown.rotation.x = 0.14;
+      headGroup.add(crown);
+      const stache = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.065, 0.06),
+        new THREE.MeshStandardMaterial({ color: 0x18181b })
+      );
+      stache.position.set(0, -0.1, 0.41);
+      headGroup.add(stache);
+    } else if (charDef.id === 'prof_jugaad') {
+      [
+        [-0.3, 0.34, 0, 0.2],
+        [0, 0.42, -0.05, 0.24],
+        [0.3, 0.34, 0, 0.2],
+        [-0.36, 0.18, -0.1, 0.17],
+        [0.36, 0.18, -0.1, 0.17],
+      ].forEach(([cx, cy, cz, r]) => {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), hairMat);
+        puff.position.set(cx, cy, cz);
+        headGroup.add(puff);
+      });
+      // Crooked welding goggles on forehead
+      const goggleGroup = new THREE.Group();
+      goggleGroup.position.set(0, 0.25, 0.34);
+      goggleGroup.rotation.z = -0.14;
+      [-0.12, 0.12].forEach((gx) => {
+        const cup = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.085, 0.085, 0.09, 12),
+          new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.45, metalness: 0.7 })
+        );
+        cup.rotation.x = Math.PI / 2;
+        cup.position.x = gx;
+        goggleGroup.add(cup);
+      });
+      headGroup.add(goggleGroup);
+    } else if (charDef.id === 'chappal_ninja') {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.43, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat);
       cap.position.set(0, 0.04, -0.02);
       headGroup.add(cap);
-      const stubble = new THREE.Mesh(
-        new THREE.SphereGeometry(0.405, 16, 12, 0, Math.PI * 2, Math.PI * 0.56, Math.PI * 0.42),
-        new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 })
+      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 12), hairMat);
+      bun.position.set(0, 0.48, -0.12);
+      headGroup.add(bun);
+      const pin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.02, 0.02, 0.42, 8),
+        new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xd97706, emissiveIntensity: 0.65, metalness: 0.85 })
       );
-      stubble.position.set(0, -0.04, 0.02);
-      headGroup.add(stubble);
-    } else if (charDef.id === 'yogi_boy') {
-      const tilak = new THREE.Mesh(
-        new THREE.BoxGeometry(0.055, 0.16, 0.04),
-        new THREE.MeshStandardMaterial({ color: 0xf97316, emissive: 0xea580c, emissiveIntensity: 0.25 })
+      pin.position.set(0, 0.5, -0.12);
+      pin.rotation.z = 1.15;
+      headGroup.add(pin);
+    } else if (charDef.id === 'dj_dholak') {
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.425, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.48), hairMat);
+      hair.position.set(0, 0.05, -0.02);
+      headGroup.add(hair);
+      // Giant DJ Headphones
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(0.46, 0.04, 10, 24, Math.PI),
+        new THREE.MeshStandardMaterial({ color: 0xf472b6, emissive: 0xdb2777, emissiveIntensity: 0.5 })
       );
-      tilak.position.set(0, 0.22, 0.39);
-      headGroup.add(tilak);
-      const bindu = new THREE.Mesh(
-        new THREE.SphereGeometry(0.028, 10, 10),
-        new THREE.MeshStandardMaterial({ color: 0xdc2626 })
-      );
-      bindu.position.set(0, 0.19, 0.41);
-      headGroup.add(bindu);
-    } else if (charDef.id === 'red_dragon') {
-      const sideHair = new THREE.Mesh(new THREE.SphereGeometry(0.435, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.54), hairMat);
-      sideHair.position.set(-0.02, 0.05, -0.02);
-      sideHair.rotation.z = 0.16;
-      headGroup.add(sideHair);
-    } else if (charDef.id === 'iron_bear') {
-      const backHair = new THREE.Mesh(new THREE.SphereGeometry(0.415, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.46), hairMat);
-      backHair.position.set(0, 0.06, -0.08);
-      backHair.rotation.x = -0.35;
-      headGroup.add(backHair);
-    } else if (charDef.id === 'dashing_trudeau') {
-      [
-        [-0.2, 0.36, 0.08, 0.22],
-        [0.02, 0.41, 0.1, 0.25],
-        [0.24, 0.34, 0.06, 0.2],
-        [-0.3, 0.2, -0.04, 0.18],
-        [0.3, 0.2, -0.04, 0.18],
-      ].forEach(([cx, cy, cz, r]) => {
-        const curl = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 12), hairMat);
-        curl.position.set(cx, cy, cz);
-        headGroup.add(curl);
+      band.position.set(0, 0.08, 0);
+      headGroup.add(band);
+      [-0.46, 0.46].forEach((cx) => {
+        const cup = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.14, 0.14, 0.1, 14),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b, emissive: 0x22d3ee, emissiveIntensity: 0.45 })
+        );
+        cup.rotation.z = Math.PI / 2;
+        cup.position.set(cx, 0.06, 0);
+        headGroup.add(cup);
       });
+    } else if (charDef.id === 'aunty_cctv') {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.43, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat);
+      cap.position.set(0, 0.04, -0.02);
+      headGroup.add(cap);
+      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 12), hairMat);
+      bun.position.set(0, 0.46, -0.1);
+      headGroup.add(bun);
+      // Mini Satellite Dish hidden in hair bun
+      const dish = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18, 0.09, 14),
+        new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.85, roughness: 0.2 })
+      );
+      dish.position.set(0, 0.62, -0.04);
+      dish.rotation.x = 0.65;
+      headGroup.add(dish);
+    } else if (charDef.id === 'bhaijaan_gymbro') {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.425, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.46), hairMat);
+      cap.position.set(0, 0.06, -0.02);
+      headGroup.add(cap);
+      const band = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.435, 0.435, 0.09, 18),
+        new THREE.MeshStandardMaterial({ color: 0xf43f5e, roughness: 0.5 })
+      );
+      band.position.set(0, 0.2, 0);
+      headGroup.add(band);
+    } else if (charDef.id === 'exam_topper') {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.425, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat);
+      cap.position.set(0, 0.05, -0.02);
+      headGroup.add(cap);
     }
   }
 
   // Two-Handed Ready Pose: Weapon + Arms
-  const weaponGroup = build3DWeapon(THREE, opts.weaponId, opts.weaponMastery);
+  const weaponGroup = build3DWeapon(THREE, opts.weaponId, opts.weaponMastery, opts.gunWrap || 'none');
   weaponGroup.position.set(0.06, 1.24, 0.46);
   weaponGroup.rotation.set(0.06, -0.32, 0.14);
   bodyPivot.add(weaponGroup);
+  const minigunBarrelSpin = weaponGroup.userData.spinGroup as ThreeTypes.Object3D | undefined;
 
   const armGeo = isSteve
     ? new THREE.BoxGeometry(0.17, 0.5, 0.17)
@@ -771,9 +1431,18 @@ function build3DCharacterRig(
   rArm.rotation.set(-0.95, 0, 0.38);
   rArm.castShadow = true;
   rightArmGroup.add(rArm);
-  const rHand = new THREE.Mesh(handGeo, skinMat);
+  const rHand = new THREE.Mesh(handGeo, charDef.id === 'baron_voltage' ? accentMat : skinMat);
   rHand.position.set(0.26, -0.26, 0.38);
   rightArmGroup.add(rHand);
+  if (charDef.id === 'baron_voltage') {
+    const rCoil = new THREE.Mesh(
+      new THREE.TorusGeometry(0.105, 0.022, 8, 16),
+      new THREE.MeshStandardMaterial({ color: 0x67e8f9, emissive: 0x22d3ee, emissiveIntensity: 1.8 })
+    );
+    rCoil.position.set(0.22, -0.22, 0.33);
+    rCoil.rotation.x = Math.PI / 3;
+    rightArmGroup.add(rCoil);
+  }
   bodyPivot.add(rightArmGroup);
 
   const leftArmGroup = new THREE.Group();
@@ -783,9 +1452,18 @@ function build3DCharacterRig(
   lArm.rotation.set(-1.05, 0, -0.25);
   lArm.castShadow = true;
   leftArmGroup.add(lArm);
-  const lHand = new THREE.Mesh(handGeo, skinMat);
+  const lHand = new THREE.Mesh(handGeo, charDef.id === 'baron_voltage' ? accentMat : skinMat);
   lHand.position.set(-0.14, -0.25, 0.44);
   leftArmGroup.add(lHand);
+  if (charDef.id === 'baron_voltage') {
+    const lCoil = new THREE.Mesh(
+      new THREE.TorusGeometry(0.105, 0.022, 8, 16),
+      new THREE.MeshStandardMaterial({ color: 0x67e8f9, emissive: 0x22d3ee, emissiveIntensity: 1.8 })
+    );
+    lCoil.position.set(-0.12, -0.22, 0.38);
+    lCoil.rotation.x = Math.PI / 3;
+    leftArmGroup.add(lCoil);
+  }
   bodyPivot.add(leftArmGroup);
 
   return {
@@ -793,10 +1471,12 @@ function build3DCharacterRig(
     bodyPivot,
     headGroup,
     weaponGroup,
+    minigunBarrelSpin,
     rightArmGroup,
     leftArmGroup,
     flameLeft,
     flameRight,
+    floatProps,
   };
 }
 
@@ -859,6 +1539,36 @@ const SquadWeaponGlyph: React.FC<{ weaponId: WeaponId }> = ({ weaponId }) => {
       </svg>
     );
   }
+  if (weapon.category === 'Minigun') {
+    return (
+      <svg viewBox="0 0 28 12" className="h-3.5 w-7 shrink-0" aria-hidden="true">
+        <path
+          d="M2 4h11v4.2H2V4zm11 0.5h13v1H13v-1zm0 2h13v1H13v-1zm-7 1.7h5V11H6V8.2z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+  if (weapon.category === 'Crossbow') {
+    return (
+      <svg viewBox="0 0 26 12" className="h-3.5 w-6.5 shrink-0" aria-hidden="true">
+        <path
+          d="M2 6h14V4l3.5-2.5L21 2.7 18.2 5H24l-2.5 1L24 7h-5.8L21 9.3l-1.5 1.2L16 8V6H2z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+  if (weapon.category === 'Energy' || weapon.category === 'Cryo') {
+    return (
+      <svg viewBox="0 0 26 12" className="h-3.5 w-6.5 shrink-0" aria-hidden="true">
+        <path
+          d="M1 5.5h5l1.5-2h11l1.5 1.5h4v2h-4l-1.5 1.5H11l-1.2 2H7l.8-2H1v-3zm8.5-.7v2.4h6.5V4.8H9.5z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
   // Assault Rifle (AK / M4A1)
   return (
     <svg viewBox="0 0 26 12" className="h-3.5 w-6.5 shrink-0" aria-hidden="true">
@@ -876,6 +1586,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
   flameId,
   weaponId,
   weaponMastery,
+  gunWrap = 'none',
   partyMembers = [],
   paused = false,
   actionSignal,
@@ -901,6 +1612,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
     flameId,
     weaponId,
     weaponMastery,
+    gunWrap,
     partyMembers,
   });
   propsRef.current = {
@@ -909,6 +1621,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
     flameId,
     weaponId,
     weaponMastery,
+    gunWrap,
     partyMembers,
   };
 
@@ -940,6 +1653,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
             flameId: idx === 0 && m.isHost ? curr.flameId : m.flameId,
             weaponId: idx === 0 && m.isHost ? curr.weaponId : m.startingWeapon,
             weaponMastery: idx === 0 && m.isHost ? curr.weaponMastery : m.weaponMastery,
+            gunWrap: idx === 0 && m.isHost ? curr.gunWrap : m.gunWrap || 'none',
             isReady: m.isReady,
             isHost: m.isHost,
           }))
@@ -951,6 +1665,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
               flameId: curr.flameId,
               weaponId: curr.weaponId,
               weaponMastery: curr.weaponMastery,
+              gunWrap: curr.gunWrap || 'none',
               isReady: true,
               isHost: true,
             },
@@ -964,6 +1679,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
         flameId: item.flameId,
         weaponId: item.weaponId,
         weaponMastery: item.weaponMastery,
+        gunWrap: item.gunWrap,
       });
       rig.root.position.set(offset[0], offset[1], offset[2]);
       if (idx > 0) {
@@ -1371,6 +2087,13 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
               rig.flameLeft.scale.set(1, fPulse, 1);
               rig.flameRight.scale.set(1, fPulse, 1);
 
+              rig.floatProps.forEach((fp) => {
+                fp.obj.position.y = fp.baseY + Math.sin(elapsed * fp.speed + fp.phase) * fp.amp;
+              });
+              if (rig.minigunBarrelSpin) {
+                rig.minigunBarrelSpin.rotation.x = elapsed * 2.8;
+              }
+
               if (idx === 0 && state.actionTimer > 0) {
                 if (state.actionType === 'ready') {
                   rig.weaponGroup.position.set(0.06, 1.24 + wave * 0.24, 0.46 - wave * 0.06);
@@ -1461,9 +2184,12 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
     };
   }, []);
 
-  // Hot-swap 3D character(s), outfits, flames, weapon skins, or squad roster
+  // Hot-swap 3D character(s), outfits, flames, weapon skins, wraps, or squad roster
   const partySignature = partyMembers
-    .map((m) => `${m.id}:${m.characterId}:${m.outfitId}:${m.flameId}:${m.startingWeapon}:${m.weaponMastery}:${m.isReady}`)
+    .map(
+      (m) =>
+        `${m.id}:${m.characterId}:${m.outfitId}:${m.flameId}:${m.startingWeapon}:${m.weaponMastery}:${m.gunWrap || 'none'}:${m.isReady}`
+    )
     .join('|');
 
   useEffect(() => {
@@ -1476,7 +2202,7 @@ export const LobbyStage3D: React.FC<LobbyStage3DProps> = ({
     state.camera.updateProjectionMatrix();
     state.actionType = 'switch';
     state.actionTimer = 0.55;
-  }, [characterId, outfitId, flameId, weaponId, weaponMastery, partySignature]);
+  }, [characterId, outfitId, flameId, weaponId, weaponMastery, gunWrap, partySignature]);
 
   useEffect(() => {
     if (!actionSignal || !sceneRefs.current) return;
