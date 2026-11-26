@@ -11,6 +11,7 @@ import {
   Sparkles,
   Swords,
   Target,
+  Ticket,
   X,
 } from 'lucide-react';
 import {
@@ -32,6 +33,7 @@ import {
 import {
   equipWeaponMasterySkin,
   getFavoriteWeapon,
+  redeemPromoCode,
   unlockOrEquipCosmetic,
 } from '../db/playerDb';
 import { GunWrapId, PlayerProfile, WeaponId, WeaponMasteryTier } from '../types/game';
@@ -56,6 +58,8 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
 }) => {
   const [tab, setTab] = useState<CareerArmoryTab>(initialTab);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
 
   const rank = getRankForXp(profile.xp);
   const nextRank = getNextRank(profile.xp);
@@ -128,6 +132,25 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
         type: 'ok',
         text: `${WEAPONS[weaponId].shortName} wrap updated to ${label}.`,
       });
+    }
+  };
+
+  const handleRedeemCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedback(null);
+    if (!promoCodeInput.trim()) return;
+    setRedeeming(true);
+    try {
+      const res = await redeemPromoCode(profile.id, promoCodeInput);
+      if (!res.ok) {
+        setFeedback({ type: 'err', text: res.error });
+      } else {
+        onProfileUpdated(res.profile);
+        setPromoCodeInput('');
+        setFeedback({ type: 'ok', text: res.message });
+      }
+    } finally {
+      setRedeeming(false);
     }
   };
 
@@ -363,6 +386,42 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Armory Redeem Promo Code Card */}
+              <form
+                onSubmit={handleRedeemCode}
+                className="flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/20 text-amber-300">
+                    <Ticket className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-white">Redeem Promo Code</div>
+                    <div className="text-xs text-slate-400">
+                      Try codes like <span className="font-mono text-amber-300">DOODLE100</span> (+1,000 Coins) or{' '}
+                      <span className="font-mono text-amber-300">CHAI2026</span> (Golden Kettle wrap).
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={promoCodeInput}
+                    onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                    placeholder="ENTER CODE"
+                    maxLength={24}
+                    className="w-36 rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono text-xs font-bold uppercase text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={redeeming || !promoCodeInput.trim()}
+                    className="rounded-lg bg-amber-500 px-3.5 py-1.5 text-xs font-black uppercase text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
+                  >
+                    Redeem
+                  </button>
+                </div>
+              </form>
             </div>
           )}
 
@@ -583,9 +642,28 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
 
           {tab === 'wraps' && (
             <div className="space-y-4">
-              <div className="text-xs text-slate-400">
-                Equip custom Gun Wraps across all firearms in both the 3D Lobby and 2D Arena. Select
-                &ldquo;Factory Issue&rdquo; to display per-weapon Mastery camos instead.
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs text-slate-400">
+                  Equip custom Gun Wraps across all firearms in both the 3D Lobby and 2D Arena. Select
+                  &ldquo;Factory Issue&rdquo; to display per-weapon Mastery camos instead.
+                </div>
+                <form onSubmit={handleRedeemCode} className="flex items-center gap-1.5 shrink-0">
+                  <input
+                    type="text"
+                    value={promoCodeInput}
+                    onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                    placeholder="PROMO CODE"
+                    maxLength={24}
+                    className="w-32 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 font-mono text-xs font-bold uppercase text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={redeeming || !promoCodeInput.trim()}
+                    className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-black uppercase text-slate-950 hover:bg-amber-400 disabled:opacity-50"
+                  >
+                    Redeem
+                  </button>
+                </form>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {GUN_WRAPS.map((wrap) => {
@@ -621,6 +699,10 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
                       background:
                         'radial-gradient(circle at 70% 25%, #E879F9, #4C1D95 50%, #0F172A 95%)',
                     },
+                    golden_kettle: {
+                      background:
+                        'linear-gradient(135deg, #78350F 0%, #F59E0B 45%, #FEF3C7 75%, #B45309 100%)',
+                    },
                   };
 
                   return (
@@ -638,20 +720,29 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
                           style={wrapBg[wrap.id]}
                         />
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-white truncate">
-                            {wrap.name}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-semibold text-white truncate">
+                              {wrap.name}
+                            </span>
+                            {wrap.id === 'golden_kettle' && (
+                              <span className="rounded bg-amber-500/20 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-amber-300">
+                                PROMO
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-400">{wrap.description}</div>
                         </div>
                       </div>
                       <button
                         onClick={() => handleCosmeticAction('wrap', wrap.id)}
-                        disabled={equipped}
+                        disabled={equipped || (wrap.id === 'golden_kettle' && !unlocked)}
                         className={`rounded-lg px-3 py-1.5 text-xs font-bold whitespace-nowrap shrink-0 transition-colors ${
                           equipped
                             ? 'bg-emerald-500/20 text-emerald-300 cursor-default'
                             : unlocked
                             ? 'bg-slate-800 text-white hover:bg-slate-700'
+                            : wrap.id === 'golden_kettle'
+                            ? 'border border-amber-500/40 bg-amber-500/10 text-amber-300 cursor-not-allowed'
                             : 'bg-amber-500 text-slate-950 hover:bg-amber-400'
                         }`}
                       >
@@ -661,6 +752,8 @@ export const CareerArmoryModal: React.FC<CareerArmoryModalProps> = ({
                           </span>
                         ) : unlocked ? (
                           'Equip'
+                        ) : wrap.id === 'golden_kettle' ? (
+                          'Code CHAI2026'
                         ) : (
                           `${wrap.cost} Coins`
                         )}

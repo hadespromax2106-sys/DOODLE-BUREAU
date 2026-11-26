@@ -9,6 +9,7 @@ import {
   Gauge,
   Maximize2,
   Minimize2,
+  Music,
   Pause,
   Radar,
   Shield,
@@ -18,7 +19,8 @@ import {
   VolumeX,
   Zap,
 } from 'lucide-react';
-import { MELEE_WEAPONS, WEAPONS, getGameModeDef, normalizeGameMode } from '../data/catalog';
+import { GUN_GAME_LADDER, MELEE_WEAPONS, WEAPONS, getGameModeDef, normalizeGameMode } from '../data/catalog';
+import { soundEngine } from '../game/audio';
 import { getArenaMap } from '../game/map';
 import {
   AimedWallSnapshot,
@@ -630,10 +632,48 @@ const PlayerMeterCluster: React.FC<{ fighter: HudFighterSnapshot; align: 'left' 
         fighter.fuelBuffTimer > 0 ||
         fighter.uavTimer > 0 ||
         fighter.rapidJetTimer > 0 ||
+        fighter.isLastStand ||
+        fighter.isVip ||
+        fighter.isBoss ||
+        (fighter.shrinkTimer || 0) > 0 ||
+        (fighter.megaSizeTimer || 0) > 0 ||
+        (fighter.bubbleShieldHp || 0) > 0 ||
         (fighter.freezeTimer || 0) > 0 ||
         (fighter.empDisableTimer || 0) > 0 ||
         (fighter.shieldHp > 0 && fighter.shieldBuffTimer > 0)) && (
         <div className="mb-1.5 flex flex-wrap gap-1">
+          {fighter.isLastStand && (
+            <span className="inline-flex items-center gap-1 rounded border border-rose-400 bg-rose-600/30 px-1.5 py-0.5 text-[10px] font-mono-tabular font-black text-rose-200 animate-pulse">
+              LAST STAND {(fighter.lastStandTimer || 0).toFixed(1)}s
+            </span>
+          )}
+          {fighter.isVip && (
+            <span className="inline-flex items-center gap-1 rounded border border-amber-400 bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-mono-tabular font-black text-amber-200">
+              <Crown className="h-2.5 w-2.5 shrink-0" />
+              VIP
+            </span>
+          )}
+          {fighter.isBoss && (
+            <span className="inline-flex items-center gap-1 rounded border border-cyan-400 bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-mono-tabular font-black text-cyan-200">
+              MEGA BOSS
+            </span>
+          )}
+          {(fighter.shrinkTimer || 0) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded border border-fuchsia-400/70 bg-fuchsia-950/60 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-fuchsia-200">
+              TINY {(fighter.shrinkTimer || 0).toFixed(1)}s
+            </span>
+          )}
+          {(fighter.megaSizeTimer || 0) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded border border-orange-400/70 bg-orange-950/60 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-orange-200">
+              MEGA {(fighter.megaSizeTimer || 0).toFixed(1)}s
+            </span>
+          )}
+          {(fighter.bubbleShieldHp || 0) > 0 && (
+            <span className="inline-flex items-center gap-1 rounded border border-cyan-300/70 bg-cyan-950/60 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-cyan-200">
+              <Shield className="h-2.5 w-2.5 shrink-0" />
+              BUBBLE {Math.round(fighter.bubbleShieldHp || 0)}
+            </span>
+          )}
           {(fighter.empDisableTimer || 0) > 0 && (
             <span className="inline-flex items-center gap-1 rounded border border-cyan-400/70 bg-cyan-950/60 px-1.5 py-0.5 text-[10px] font-mono-tabular font-bold text-cyan-300">
               <Zap className="h-2.5 w-2.5 shrink-0" />
@@ -815,12 +855,16 @@ export const GameHud: React.FC<GameHudProps> = ({
   onToggleFullscreen,
   onPause,
 }) => {
+  const [musicOn, setMusicOn] = React.useState(() => soundEngine.isMusicEnabled());
   const activeMode = normalizeGameMode(hud.rules.gameMode);
   const modeDef = getGameModeDef(activeMode);
 
   const sortedStandings = [...hud.fighters].sort((a, b) => {
     if ((activeMode === 'hardpoint' || activeMode === 'domination') && b.kothPoints !== a.kothPoints) {
       return b.kothPoints - a.kothPoints;
+    }
+    if (activeMode === 'gun_game' && (b.gunGameTier || 0) !== (a.gunGameTier || 0)) {
+      return (b.gunGameTier || 0) - (a.gunGameTier || 0);
     }
     if (b.kills !== a.kills) return b.kills - a.kills;
     return a.deaths - b.deaths;
@@ -843,7 +887,9 @@ export const GameHud: React.FC<GameHudProps> = ({
           <div className="flex items-center justify-between text-[10px] font-semibold tracking-wider text-slate-400 mb-1.5">
             <span>{modeDef.shortName.toUpperCase()}</span>
             <span className="font-mono-tabular text-slate-300">
-              {modeDef.teamBased ? `FIRST TO ${modeDef.scoreLimit}` : 'FIRST TO 20 KILLS'}
+              {activeMode === 'boss_raid'
+                ? '4v1 BOSS RAID'
+                : `FIRST TO ${modeDef.scoreLimit} ${modeDef.scoreLabel.toUpperCase()}`}
             </span>
           </div>
 
@@ -967,6 +1013,23 @@ export const GameHud: React.FC<GameHudProps> = ({
               {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </button>
 
+            <button
+              onClick={() => {
+                const next = !musicOn;
+                setMusicOn(next);
+                soundEngine.setMusicEnabled(next);
+              }}
+              className={`rounded-lg border p-2 transition-colors ${
+                musicOn
+                  ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-300'
+                  : 'border-slate-700/70 bg-[#0B101B]/90 text-slate-500 hover:text-slate-300'
+              }`}
+              title={musicOn ? 'Disable Battle Music' : 'Enable Battle Music'}
+              aria-label={musicOn ? 'Disable Battle Music' : 'Enable Battle Music'}
+            >
+              <Music className="h-4 w-4" />
+            </button>
+
             {onToggleFullscreen && (
               <button
                 onClick={onToggleFullscreen}
@@ -1084,6 +1147,96 @@ export const GameHud: React.FC<GameHudProps> = ({
               FREE-FOR-ALL · LEADER: {sortedStandings[0].name} ({sortedStandings[0].kills}/20)
             </div>
           )}
+
+          {/* Gun Game Tier Banner */}
+          {activeMode === 'gun_game' && hud.gunGame && localSingleFighter && (
+            <div className="rounded-lg border border-rose-500/45 bg-[#0B101B]/90 px-3 py-1 text-[11px] font-mono-tabular font-bold text-rose-200">
+              GUN GAME · TIER {(localSingleFighter.gunGameTier ?? 0) + 1}/{hud.gunGame.maxTiers} (
+              {GUN_GAME_LADDER[localSingleFighter.gunGameTier ?? 0]
+                ? WEAPONS[GUN_GAME_LADDER[localSingleFighter.gunGameTier ?? 0]]?.shortName
+                : 'FINAL MELEE'}
+              ) · LEADER: {hud.gunGame.leaderName} ({hud.gunGame.leaderTier + 1}/{hud.gunGame.maxTiers})
+            </div>
+          )}
+
+          {/* VIP Banner */}
+          {activeMode === 'vip' && hud.teamScores && (
+            <div className="rounded-lg border border-amber-400/50 bg-[#0B101B]/90 px-3 py-1 text-[11px] font-mono-tabular font-bold text-amber-200">
+              VIP: PROTECT THE CHAI · ALPHA {hud.teamScores.alpha} vs {hud.teamScores.bravo} BRAVO · 2x PTS FOR VIP KO
+            </div>
+          )}
+
+          {/* One-in-the-Chamber Banner */}
+          {activeMode === 'one_in_chamber' && sortedStandings[0] && (
+            <div className="rounded-lg border border-pink-500/45 bg-[#0B101B]/90 px-3 py-1 text-[11px] font-mono-tabular font-bold text-pink-200">
+              1-IN-CHAMBER (1 HP) · LEADER: {sortedStandings[0].name} ({sortedStandings[0].kills}/15)
+            </div>
+          )}
+
+          {/* Boss Raid Mega Baron 1,500 HP Bar */}
+          {activeMode === 'boss_raid' && hud.bossRaid && (
+            <div className="w-72 sm:w-96 rounded-lg border border-cyan-400/60 bg-[#0B101B]/92 px-3 py-1.5">
+              <div className="flex items-center justify-between text-[10px] font-mono-tabular font-black uppercase text-cyan-300 mb-1">
+                <span>{hud.bossRaid.bossName}</span>
+                <span>
+                  {hud.bossRaid.alive
+                    ? `${Math.max(0, Math.round(hud.bossRaid.hp))} / ${hud.bossRaid.maxHp} HP`
+                    : 'DEFEATED'}
+                </span>
+              </div>
+              <div className="h-2.5 w-full rounded-sm bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-cyan-400 to-rose-500 transition-all duration-100"
+                  style={{
+                    width: `${Math.max(0, Math.min(100, (hud.bossRaid.hp / Math.max(1, hud.bossRaid.maxHp)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* V3.0 Dynamic Chaos Event Warning & Active Countdown */}
+          {hud.chaos?.phase === 'warning' && (
+            <div className="rounded-xl border-2 border-amber-400 bg-rose-950/95 px-5 py-2 text-center shadow-2xl animate-pulse">
+              <div className="font-display text-lg font-black tracking-widest text-amber-300 uppercase">
+                WARNING: CHAOS EVENT!
+              </div>
+              <div className="font-mono-tabular text-xs font-bold text-white">
+                {hud.chaos.title} · {hud.chaos.subtitle} ({Math.ceil(hud.chaos.warningTimerSec)}s)
+              </div>
+            </div>
+          )}
+          {hud.chaos?.phase === 'active' && (
+            <div className="rounded-lg border border-amber-400/70 bg-amber-500/20 px-3 py-1 text-[11px] font-mono-tabular font-black text-amber-200">
+              CHAOS ACTIVE: {hud.chaos.title.toUpperCase()} · {Math.ceil(hud.chaos.remainingSec)}s
+            </div>
+          )}
+
+          {/* V3.0 Subway Siren, Earthquake & Turret Hack Banners */}
+          <div className="flex flex-wrap items-center justify-center gap-1.5">
+            {hud.train && !hud.train.active && hud.train.warningTimerSec > 0 && (
+              <span className="rounded border border-rose-400 bg-rose-600/30 px-2.5 py-0.5 font-mono-tabular text-[10px] font-black text-rose-200 animate-pulse">
+                TRAIN INCOMING ({hud.train.warningTimerSec.toFixed(1)}s)
+              </span>
+            )}
+            {hud.earthquakeActive && (
+              <span className="rounded border border-orange-400 bg-orange-600/30 px-2.5 py-0.5 font-mono-tabular text-[10px] font-black text-orange-200 animate-pulse">
+                EARTHQUAKE COLLAPSE!
+              </span>
+            )}
+            {hud.airdrop?.active && !hud.airdrop.landed && (
+              <span className="rounded border border-yellow-400 bg-yellow-500/20 px-2.5 py-0.5 font-mono-tabular text-[10px] font-black text-yellow-200">
+                GOLDEN AIRDROP INCOMING
+              </span>
+            )}
+            {hud.turret && (hud.turret.hackProgress > 0 || hud.turret.ownerName) && (
+              <span className="rounded border border-cyan-400/60 bg-cyan-950/80 px-2.5 py-0.5 font-mono-tabular text-[10px] font-bold text-cyan-200">
+                {hud.turret.hackProgress > 0 && hud.turret.hackProgress < 1
+                  ? `HACKING TURRET ${Math.round(hud.turret.hackProgress * 100)}%`
+                  : `TURRET: ${hud.turret.ownerName?.toUpperCase() || 'NEUTRAL'}`}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Top-Right: Circular Live Radar Minimap + Sliding Kill Feed */}
@@ -1108,7 +1261,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               <div />
             )}
             <div className="hidden lg:block rounded-lg border border-slate-800/70 bg-[#0B101B]/75 px-3 py-1.5 text-[11px] text-slate-400 font-mono-tabular">
-              WASD Move/Jet · Click Fire · 1 Primary · 2 Secondary · 3 Melee · V Strike · G/Tab Grenade · E Ult · R Reload · Z Zoom
+              WASD Move/Jet · 2x A/D Dash · RMB/C Grapple · 1/2/3 Weapons · V Melee · G/Tab Grenade · E Ult · T Emote · Y Spray
             </div>
           </>
         )}

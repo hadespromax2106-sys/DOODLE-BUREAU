@@ -79,8 +79,20 @@ export type ChaosEventType =
   | 'blackout'
   | 'hyper_frenzy';
 
-export type EmoteId = 'chai' | 'trophy' | 'laugh_skull';
-export type SprayId = 'chai_break' | 'aim_404';
+export type EmoteId =
+  | 'chai'
+  | 'trophy'
+  | 'laugh_skull'
+  | 'dab_flex'
+  | 'salute'
+  | 'crown_king';
+export type SprayId =
+  | 'chai_break'
+  | 'aim_404'
+  | 'doodle_crown'
+  | 'no_camping'
+  | 'sniper_bait'
+  | 'kadak_bolt';
 
 export type CharacterId =
   | 'chai_storm'
@@ -757,6 +769,11 @@ export interface WallSprayHudState {
   ownerName: string;
   life: number;
   maxLife: number;
+  surface?: 'wall' | 'backdrop';
+  wallId?: string;
+  rotation?: number;
+  persistent?: boolean;
+  ageSec?: number;
 }
 
 export interface EmotePopupHudState {
@@ -854,7 +871,9 @@ export interface RemoteInputPacket {
   grappleJust?: boolean;
   dashDir?: -1 | 0 | 1;
   emoteJust?: boolean;
+  emoteId?: EmoteId;
   sprayJust?: boolean;
+  sprayId?: SprayId;
 }
 
 export interface OnlinePeerMeta {

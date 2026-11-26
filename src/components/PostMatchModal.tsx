@@ -8,6 +8,8 @@ import { MvpConfettiCanvas } from './MvpConfettiCanvas';
 interface PostMatchModalProps {
   summary: MatchSummary;
   hasReplay?: boolean;
+  isTournamentMatch?: boolean;
+  onReturnTournament?: () => void;
   onWatchReplay?: () => void;
   onPlayAgain: () => void;
   onReturnLobby: () => void;
@@ -111,6 +113,22 @@ const RewardCard: React.FC<{ reward: PlayerMatchReward; slotLabel: string }> = (
         </div>
       </div>
 
+      {/* V3.0 Afterlife & Nemesis Revenge Bonuses */}
+      {((reward.afterlifeKills ?? 0) > 0 || (reward.nemesisKills ?? 0) > 0 || (reward.nemesisRevengeCoins ?? 0) > 0) && (
+        <div className="border-t border-slate-800 pt-2 flex flex-wrap items-center gap-3 text-[11px] font-semibold">
+          {(reward.afterlifeKills ?? 0) > 0 && (
+            <span className="rounded bg-rose-500/15 px-2 py-0.5 text-rose-300">
+              Last Stand Afterlife: {reward.afterlifeKills} Kill{(reward.afterlifeKills ?? 0) > 1 ? 's' : ''}
+            </span>
+          )}
+          {(reward.nemesisKills ?? 0) > 0 && (
+            <span className="rounded bg-amber-500/15 px-2 py-0.5 text-amber-300">
+              Nemesis Revenge x{reward.nemesisKills} (+{reward.nemesisRevengeCoins ?? (reward.nemesisKills ?? 0) * 500}c)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Newly Unlocked Achievements / Daily Challenges */}
       {((reward.newAchievements && reward.newAchievements.length > 0) ||
         (reward.completedChallenges && reward.completedChallenges.length > 0)) && (
@@ -136,6 +154,8 @@ const RewardCard: React.FC<{ reward: PlayerMatchReward; slotLabel: string }> = (
 export const PostMatchModal: React.FC<PostMatchModalProps> = ({
   summary,
   hasReplay,
+  isTournamentMatch,
+  onReturnTournament,
   onWatchReplay,
   onPlayAgain,
   onReturnLobby,
@@ -178,6 +198,15 @@ export const PostMatchModal: React.FC<PostMatchModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {isTournamentMatch && onReturnTournament && (
+              <button
+                onClick={onReturnTournament}
+                className="flex items-center gap-1.5 rounded-lg bg-cyan-500 px-4 py-2 text-xs font-black text-slate-950 hover:bg-cyan-400 whitespace-nowrap shrink-0 transition-colors"
+              >
+                <Crown className="h-3.5 w-3.5" />
+                Back to Bracket
+              </button>
+            )}
             {hasReplay && onWatchReplay && (
               <button
                 onClick={onWatchReplay}
@@ -194,13 +223,15 @@ export const PostMatchModal: React.FC<PostMatchModalProps> = ({
               <Home className="h-3.5 w-3.5" />
               Lobby
             </button>
-            <button
-              onClick={onPlayAgain}
-              className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 whitespace-nowrap shrink-0 transition-colors"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Play Again
-            </button>
+            {!isTournamentMatch && (
+              <button
+                onClick={onPlayAgain}
+                className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-5 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 whitespace-nowrap shrink-0 transition-colors"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Play Again
+              </button>
+            )}
           </div>
         </div>
 
@@ -331,7 +362,15 @@ export const PostMatchModal: React.FC<PostMatchModalProps> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-400">{row.rankTitle}</div>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                                <span>{row.rankTitle}</span>
+                                {(row.afterlifeKills ?? 0) > 0 && (
+                                  <span className="text-rose-300 font-semibold">· {row.afterlifeKills} Afterlife</span>
+                                )}
+                                {(row.nemesisKills ?? 0) > 0 && (
+                                  <span className="text-amber-300 font-semibold">· {row.nemesisKills} Revenge</span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -358,6 +397,10 @@ export const PostMatchModal: React.FC<PostMatchModalProps> = ({
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="border-t border-slate-800/80 pt-3 text-center text-[11px] font-mono-tabular text-slate-500">
+            Doodle Bureau · made by somewhat dead man
           </div>
         </div>
       </div>

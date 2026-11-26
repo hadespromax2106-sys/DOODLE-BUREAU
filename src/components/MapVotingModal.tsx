@@ -215,7 +215,7 @@ export const MapVotingModal: React.FC<MapVotingModalProps> = ({
                 Matchmaking · Map &amp; Mode Vote
               </h2>
               <p className="mt-1 text-xs text-slate-400">
-                {Math.round(rules.durationSec / 60)}m · Gravity {Math.round(rules.gravityScale * 100)}%
+                9 Modes · Chaos Events &amp; Arena Gadgets Active · {Math.round(rules.durationSec / 60)}m · Gravity {Math.round(rules.gravityScale * 100)}%
                 {rules.oneHitSnipers ? ' · 1-Hit Snipers' : ''}
                 {rules.infiniteFuel ? ' · Infinite Fuel' : ''}
                 {partyMembers.length > 0 && ` · ${partyMembers.length}-Player Squad Locked on Team Alpha`}

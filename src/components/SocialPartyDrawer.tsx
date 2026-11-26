@@ -10,6 +10,7 @@ import {
   Radio,
   Send,
   ShieldCheck,
+  Trophy,
   UserMinus,
   UserPlus,
   Users,
@@ -47,6 +48,7 @@ interface SocialPartyDrawerProps {
   onLeaveParty: () => void;
   onToggleReady: () => void;
   onSendChat: (text: string) => void;
+  onOpenTournament?: () => void;
 }
 
 const STATUS_BADGE: Record<
@@ -93,6 +95,7 @@ export const SocialPartyDrawer: React.FC<SocialPartyDrawerProps> = ({
   onLeaveParty,
   onToggleReady,
   onSendChat,
+  onOpenTournament,
 }) => {
   const [tab, setTab] = useState<'friends' | 'squad'>('friends');
   const [tagInput, setTagInput] = useState('');
@@ -530,6 +533,31 @@ export const SocialPartyDrawer: React.FC<SocialPartyDrawerProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Party Tournament Bracket Launcher */}
+            {onOpenTournament && (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/15 to-cyan-500/10 p-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-amber-300">
+                    <Trophy className="h-3.5 w-3.5 shrink-0" />
+                    Knockout Cup
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    Run a 4 or 8-player 1v1 Tournament Bracket with your squad!
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenTournament();
+                  }}
+                  className="whitespace-nowrap shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-black uppercase text-slate-950 hover:bg-amber-400"
+                >
+                  Open Bracket
+                </button>
+              </div>
+            )}
 
             {/* 4-Slot Squad Roster */}
             <div className="space-y-2">

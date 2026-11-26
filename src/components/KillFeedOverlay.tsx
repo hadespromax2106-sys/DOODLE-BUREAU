@@ -107,6 +107,19 @@ const WeaponCategoryGlyph: React.FC<{ weaponId: KillFeedWeaponId }> = ({
     );
   }
 
+  if (weaponId === 'turret') {
+    return <Zap className="h-3 w-3 text-cyan-400 shrink-0" />;
+  }
+  if (weaponId === 'train') {
+    return <Flame className="h-3 w-3 text-amber-400 shrink-0" />;
+  }
+  if (weaponId === 'last_stand') {
+    return <Swords className="h-3 w-3 text-rose-400 shrink-0" />;
+  }
+  if (weaponId === 'emp') {
+    return <Zap className="h-3 w-3 text-blue-400 shrink-0" />;
+  }
+
   const weapon = WEAPONS[weaponId];
   if (!weapon) return null;
   if (weapon.category === 'Sniper') {
@@ -204,7 +217,11 @@ function getWeaponLabel(weaponId: KillFeedWeaponId): string {
   if (weaponId === 'airstrike') return 'AIRSTRIKE';
   if (weaponId === 'dual_pistols') return '2X PISTOLS';
   if (weaponId === 'dual_smgs') return '2X SMGS';
-  return WEAPONS[weaponId]?.shortName || weaponId.toUpperCase();
+  if (weaponId === 'turret') return 'TURRET';
+  if (weaponId === 'train') return 'SUBWAY';
+  if (weaponId === 'last_stand') return 'LAST STAND';
+  if (weaponId === 'emp') return 'ARCANE EMP';
+  return WEAPONS[weaponId]?.shortName || String(weaponId).toUpperCase();
 }
 
 export const KillFeedOverlay: React.FC<KillFeedOverlayProps> = ({ items, className = '' }) => {

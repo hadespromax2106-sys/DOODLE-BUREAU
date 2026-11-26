@@ -30,6 +30,7 @@ import {
   CustomMatchRules,
   DominationHudState,
   DualWieldType,
+  EmoteId,
   EmotePopupHudState,
   FighterMatchSummary,
   GameMode,
@@ -60,9 +61,11 @@ import {
   RemoteInputPacket,
   ReplayFrame,
   SecondaryWeaponId,
+  SprayId,
   SubwayTrainHudState,
   TeamId,
   TeamScoreHud,
+  TournamentParticipant,
   TurretHudState,
   WallSprayHudState,
   WeaponId,
@@ -123,6 +126,7 @@ export interface EngineStartConfig {
   partyMembers?: PartyMember[];
   localPlayerIndex?: PlayerSlotIndex;
   peerSession?: PeerRoomSession | null;
+  tournamentOpponent?: TournamentParticipant;
   onHudUpdate: (hud: HudSnapshot) => void;
   onMatchEnd: (summary: MatchSummary) => void;
 }
@@ -260,6 +264,9 @@ export class ArenaGameEngine {
     jetpack: false,
   };
   private touchButtonsJust = new Set<string>();
+  private radialMenuOpen = false;
+  private queuedEmoteId: EmoteId | null = null;
+  private queuedSprayId: SprayId | null = null;
 
   private remoteInputs = new Map<
     PlayerSlotIndex,
@@ -272,7 +279,9 @@ export class ArenaGameEngine {
       grappleLatch: boolean;
       dashDirLatch: -1 | 0 | 1;
       emoteLatch: boolean;
+      emoteIdLatch?: EmoteId;
       sprayLatch: boolean;
+      sprayIdLatch?: SprayId;
       switchSlotLatch?: WeaponSlot;
     }
   >();
@@ -834,17 +843,20 @@ export class ArenaGameEngine {
           this.isTeamMode() && curBravo <= curAlpha ? 'bravo' : curAlpha < curBravo ? 'alpha' : 'bravo';
         const spawnPool = team === 'alpha' ? alphaSpawnList : bravoSpawnList;
         const sp = spawnPool[i % spawnPool.length];
+        const tOpp = i === 0 ? this.config.tournamentOpponent : undefined;
         const charDef = botChars[i % botChars.length] || CHARACTERS[i % CHARACTERS.length];
-        const botRank = RANKS[Math.min(RANKS.length - 1, Math.floor(Math.random() * 3) + 1)];
-        const botWeapon = botWeapons[i % botWeapons.length];
-        const candidateName = availableBotNames[i] || `Bot_Agent_${i + 1}`;
+        const botRank = tOpp
+          ? RANKS.find((r) => r.title === tOpp.rankTitle) || RANKS[2]
+          : RANKS[Math.min(RANKS.length - 1, Math.floor(Math.random() * 3) + 1)];
+        const botWeapon = tOpp ? tOpp.startingWeapon : botWeapons[i % botWeapons.length];
+        const candidateName = tOpp ? tOpp.name : availableBotNames[i] || `Bot_Agent_${i + 1}`;
         this.fighters.push(
           this.createFighter({
             id: `bot_${i + 1}`,
             name: claimName(candidateName),
-            characterId: charDef.id,
-            outfitId: 'charcoal',
-            flameId: team === 'alpha' ? 'cobalt' : 'crimson',
+            characterId: tOpp ? tOpp.characterId : charDef.id,
+            outfitId: tOpp ? tOpp.outfitId : 'charcoal',
+            flameId: tOpp ? tOpp.flameId : team === 'alpha' ? 'cobalt' : 'crimson',
             rank: botRank,
             isHuman: false,
             team,
@@ -1120,8 +1132,14 @@ export class ArenaGameEngine {
           if (input.cycleGrenadeJust) existing.cycleGrenadeLatch = true;
           if (input.grappleJust) existing.grappleLatch = true;
           if (input.dashDir) existing.dashDirLatch = input.dashDir;
-          if (input.emoteJust) existing.emoteLatch = true;
-          if (input.sprayJust) existing.sprayLatch = true;
+          if (input.emoteJust) {
+            existing.emoteLatch = true;
+            if (input.emoteId) existing.emoteIdLatch = input.emoteId;
+          }
+          if (input.sprayJust) {
+            existing.sprayLatch = true;
+            if (input.sprayId) existing.sprayIdLatch = input.sprayId;
+          }
           if (input.switchSlot) existing.switchSlotLatch = input.switchSlot;
           existing.packet = input;
           this.remoteInputs.set(senderSlot, existing);
@@ -1252,6 +1270,22 @@ export class ArenaGameEngine {
     }
   }
 
+  public setRadialMenuOpen(open: boolean): void {
+    this.radialMenuOpen = open;
+    if (open) {
+      this.mouseScreen.down = false;
+      this.mouseScreen.rightDown = false;
+    }
+  }
+
+  public triggerEmote(emoteId: EmoteId): void {
+    this.queuedEmoteId = emoteId;
+  }
+
+  public triggerSpray(sprayId: SprayId): void {
+    this.queuedSprayId = sprayId;
+  }
+
   public getReplayData(): MatchReplayData {
     return {
       mode: this.config.mode,
@@ -1331,12 +1365,14 @@ export class ArenaGameEngine {
     if (clientFighter && cam) {
       const aimAngle = this.computeAimAngle(clientFighter, cam, 0, this.canvas.width);
       let switchSlot: WeaponSlot | undefined;
-      if (this.justPressed.has('Digit1')) switchSlot = 'primary';
-      else if (this.justPressed.has('Digit2')) switchSlot = 'secondary';
-      else if (this.justPressed.has('Digit3')) switchSlot = 'melee';
-      else if (this.touchButtonsJust.has('cycle_slot')) {
-        const order: WeaponSlot[] = ['primary', 'secondary', 'melee'];
-        switchSlot = order[(order.indexOf(clientFighter.activeSlot) + 1) % order.length];
+      if (!this.radialMenuOpen) {
+        if (this.justPressed.has('Digit1')) switchSlot = 'primary';
+        else if (this.justPressed.has('Digit2')) switchSlot = 'secondary';
+        else if (this.justPressed.has('Digit3')) switchSlot = 'melee';
+        else if (this.touchButtonsJust.has('cycle_slot')) {
+          const order: WeaponSlot[] = ['primary', 'secondary', 'melee'];
+          switchSlot = order[(order.indexOf(clientFighter.activeSlot) + 1) % order.length];
+        }
       }
       let dashDir: -1 | 0 | 1 = 0;
       if (this.justPressed.has('KeyA')) {
@@ -1349,11 +1385,19 @@ export class ArenaGameEngine {
       else if (this.touchButtonsJust.has('dash_right')) dashDir = 1;
 
       const grapple =
-        this.mouseScreen.rightDown || this.heldKeys.has('KeyC') || this.touchButtonsJust.has('grapple');
+        !this.radialMenuOpen &&
+        (this.mouseScreen.rightDown || this.heldKeys.has('KeyC') || this.touchButtonsJust.has('grapple'));
       const grappleJust =
-        this.justPressed.has('MouseRight') ||
-        this.justPressed.has('KeyC') ||
-        this.touchButtonsJust.has('grapple');
+        !this.radialMenuOpen &&
+        (this.justPressed.has('MouseRight') ||
+          this.justPressed.has('KeyC') ||
+          this.touchButtonsJust.has('grapple'));
+      const queuedEmoteId = this.queuedEmoteId ?? undefined;
+      const emoteJust = Boolean(queuedEmoteId) || this.touchButtonsJust.has('emote');
+      this.queuedEmoteId = null;
+      const queuedSprayId = this.queuedSprayId ?? undefined;
+      const sprayJust = Boolean(queuedSprayId) || this.touchButtonsJust.has('spray');
+      this.queuedSprayId = null;
 
       const packet: RemoteInputPacket = {
         left: this.heldKeys.has('KeyA') || this.touchState.moveX < -0.25,
@@ -1364,16 +1408,19 @@ export class ArenaGameEngine {
           this.justPressed.has('Space') ||
           this.touchButtonsJust.has('jump'),
         down: this.heldKeys.has('KeyS') || this.touchState.moveY > 0.45,
-        shoot: this.mouseScreen.down || this.heldKeys.has('KeyF') || this.touchState.firing,
+        shoot:
+          !this.radialMenuOpen &&
+          (this.mouseScreen.down || this.heldKeys.has('KeyF') || this.touchState.firing),
         reload: this.justPressed.has('KeyR') || this.touchButtonsJust.has('reload'),
         ultimate:
           this.justPressed.has('KeyE') ||
           this.justPressed.has('ShiftLeft') ||
           this.touchButtonsJust.has('ultimate'),
         meleeJust:
-          this.justPressed.has('KeyV') ||
-          this.justPressed.has('KeyQ') ||
-          this.touchButtonsJust.has('melee'),
+          !this.radialMenuOpen &&
+          (this.justPressed.has('KeyV') ||
+            this.justPressed.has('KeyQ') ||
+            this.touchButtonsJust.has('melee')),
         grenadeJust: this.justPressed.has('KeyG') || this.touchButtonsJust.has('grenade'),
         cycleGrenadeJust:
           this.justPressed.has('Tab') || this.touchButtonsJust.has('cycle_grenade'),
@@ -1382,8 +1429,10 @@ export class ArenaGameEngine {
         grapple,
         grappleJust,
         dashDir,
-        emoteJust: this.justPressed.has('KeyT') || this.touchButtonsJust.has('emote'),
-        sprayJust: this.justPressed.has('KeyY') || this.touchButtonsJust.has('spray'),
+        emoteJust,
+        emoteId: queuedEmoteId,
+        sprayJust,
+        sprayId: queuedSprayId,
       };
       this.config.peerSession?.send({ type: 'input', payload: packet });
       cam.x += (clientFighter.x - cam.x) * Math.min(1, dt * 8);
@@ -1643,7 +1692,9 @@ export class ArenaGameEngine {
         grappleJust: boolean;
         dashDir: -1 | 0 | 1;
         emoteJust: boolean;
+        emoteId?: EmoteId;
         sprayJust: boolean;
+        sprayId?: SprayId;
       };
 
       if (f.isHuman) {
@@ -1663,7 +1714,9 @@ export class ArenaGameEngine {
               grappleJust: Boolean(remote.packet.grappleJust || remote.grappleLatch),
               dashDir: (remote.packet.dashDir || remote.dashDirLatch || 0) as -1 | 0 | 1,
               emoteJust: Boolean(remote.packet.emoteJust || remote.emoteLatch),
+              emoteId: remote.packet.emoteId || remote.emoteIdLatch,
               sprayJust: Boolean(remote.packet.sprayJust || remote.sprayLatch),
+              sprayId: remote.packet.sprayId || remote.sprayIdLatch,
             };
             remote.upJustLatch = false;
             remote.meleeLatch = false;
@@ -1672,7 +1725,9 @@ export class ArenaGameEngine {
             remote.grappleLatch = false;
             remote.dashDirLatch = 0;
             remote.emoteLatch = false;
+            remote.emoteIdLatch = undefined;
             remote.sprayLatch = false;
+            remote.sprayIdLatch = undefined;
             remote.switchSlotLatch = undefined;
           } else {
             input = {
@@ -1740,34 +1795,33 @@ export class ArenaGameEngine {
       f.facing = Math.cos(f.aimAngle) >= 0 ? 1 : -1;
 
       if (input.emoteJust) {
-        const emoteDef = EMOTE_DEFS[f.emoteIndex % EMOTE_DEFS.length];
-        f.emoteIndex = (f.emoteIndex + 1) % EMOTE_DEFS.length;
+        const emoteDef =
+          (input.emoteId ? EMOTE_DEFS.find((e) => e.id === input.emoteId) : undefined) ||
+          EMOTE_DEFS[f.emoteIndex % EMOTE_DEFS.length];
+        if (!input.emoteId) {
+          f.emoteIndex = (f.emoteIndex + 1) % EMOTE_DEFS.length;
+        }
         this.emotePopups.push({
           id: this.nextEmoteId++,
           fighterId: f.id,
           x: f.x,
-          y: f.y - 46,
+          y: f.y - 54,
           emoteId: emoteDef.id,
-          life: 2.0,
-          maxLife: 2.0,
+          life: 2.35,
+          maxLife: 2.35,
         });
         soundEngine.playEmote();
         this.pendingNetEvents.push({ kind: 'emote', x: f.x, y: f.y });
       }
 
       if (input.sprayJust) {
-        const sprayDef = SPRAY_DEFS[f.sprayIndex % SPRAY_DEFS.length];
-        f.sprayIndex = (f.sprayIndex + 1) % SPRAY_DEFS.length;
-        this.wallSprays.push({
-          id: this.nextSprayId++,
-          x: f.x,
-          y: f.y,
-          sprayId: sprayDef.id,
-          ownerName: f.name,
-          life: 25,
-          maxLife: 25,
-        });
-        if (this.wallSprays.length > 16) this.wallSprays.shift();
+        const sprayDef =
+          (input.sprayId ? SPRAY_DEFS.find((s) => s.id === input.sprayId) : undefined) ||
+          SPRAY_DEFS[f.sprayIndex % SPRAY_DEFS.length];
+        if (!input.sprayId) {
+          f.sprayIndex = (f.sprayIndex + 1) % SPRAY_DEFS.length;
+        }
+        this.spawnWallSpray(f, sprayDef.id);
         soundEngine.playSpray();
         this.pendingNetEvents.push({ kind: 'spray', x: f.x, y: f.y });
       }
@@ -1918,32 +1972,36 @@ export class ArenaGameEngine {
       (isSoloLike && this.heldKeys.has('ArrowDown')) ||
       this.touchState.moveY > 0.45;
     const shoot =
-      (mode === 'versus_2p' ? this.heldKeys.has('KeyF') : this.mouseScreen.down || this.heldKeys.has('KeyF')) ||
-      this.touchState.firing;
+      !this.radialMenuOpen &&
+      ((mode === 'versus_2p' ? this.heldKeys.has('KeyF') : this.mouseScreen.down || this.heldKeys.has('KeyF')) ||
+        this.touchState.firing);
     const reload = this.justPressed.has('KeyR') || this.touchButtonsJust.has('reload');
     const ultimate =
       this.justPressed.has('KeyE') ||
       this.justPressed.has('ShiftLeft') ||
       this.touchButtonsJust.has('ultimate');
     const meleeJust =
-      this.justPressed.has('KeyV') ||
-      this.justPressed.has('KeyQ') ||
-      this.touchButtonsJust.has('melee');
+      !this.radialMenuOpen &&
+      (this.justPressed.has('KeyV') ||
+        this.justPressed.has('KeyQ') ||
+        this.touchButtonsJust.has('melee'));
     const grenadeJust =
       this.justPressed.has('KeyG') || this.touchButtonsJust.has('grenade');
 
     const cycleGrenadeJust =
       this.justPressed.has('Tab') || this.touchButtonsJust.has('cycle_grenade');
     let switchSlot: WeaponSlot | undefined;
-    if (this.justPressed.has('Digit1')) {
-      switchSlot = 'primary';
-    } else if (this.justPressed.has('Digit2')) {
-      switchSlot = 'secondary';
-    } else if (this.justPressed.has('Digit3')) {
-      switchSlot = 'melee';
-    } else if (this.touchButtonsJust.has('cycle_slot')) {
-      const order: WeaponSlot[] = ['primary', 'secondary', 'melee'];
-      switchSlot = order[(order.indexOf(f.activeSlot) + 1) % order.length];
+    if (!this.radialMenuOpen) {
+      if (this.justPressed.has('Digit1')) {
+        switchSlot = 'primary';
+      } else if (this.justPressed.has('Digit2')) {
+        switchSlot = 'secondary';
+      } else if (this.justPressed.has('Digit3')) {
+        switchSlot = 'melee';
+      } else if (this.touchButtonsJust.has('cycle_slot')) {
+        const order: WeaponSlot[] = ['primary', 'secondary', 'melee'];
+        switchSlot = order[(order.indexOf(f.activeSlot) + 1) % order.length];
+      }
     }
 
     let aimAngle = f.aimAngle;
@@ -1974,13 +2032,20 @@ export class ArenaGameEngine {
     else if (this.touchButtonsJust.has('dash_right')) dashDir = 1;
 
     const grapple =
-      this.mouseScreen.rightDown || this.heldKeys.has('KeyC') || this.touchButtonsJust.has('grapple');
+      !this.radialMenuOpen &&
+      (this.mouseScreen.rightDown || this.heldKeys.has('KeyC') || this.touchButtonsJust.has('grapple'));
     const grappleJust =
-      this.justPressed.has('MouseRight') ||
-      this.justPressed.has('KeyC') ||
-      this.touchButtonsJust.has('grapple');
-    const emoteJust = this.justPressed.has('KeyT') || this.touchButtonsJust.has('emote');
-    const sprayJust = this.justPressed.has('KeyY') || this.touchButtonsJust.has('spray');
+      !this.radialMenuOpen &&
+      (this.justPressed.has('MouseRight') ||
+        this.justPressed.has('KeyC') ||
+        this.touchButtonsJust.has('grapple'));
+    const queuedEmoteId = this.queuedEmoteId ?? undefined;
+    const emoteJust = Boolean(queuedEmoteId) || this.touchButtonsJust.has('emote');
+    this.queuedEmoteId = null;
+
+    const queuedSprayId = this.queuedSprayId ?? undefined;
+    const sprayJust = Boolean(queuedSprayId) || this.touchButtonsJust.has('spray');
+    this.queuedSprayId = null;
 
     return {
       left,
@@ -2000,7 +2065,9 @@ export class ArenaGameEngine {
       grappleJust,
       dashDir,
       emoteJust,
+      emoteId: queuedEmoteId,
       sprayJust,
+      sprayId: queuedSprayId,
     };
   }
 
@@ -5546,21 +5613,147 @@ export class ArenaGameEngine {
     this.afterimages = this.afterimages.filter((ag) => ag.alpha > 0.04);
   }
 
+  private spawnWallSpray(f: FighterEntity, sprayId: SprayId): void {
+    const startX = f.x;
+    const startY = f.y - 6;
+    const cos = Math.cos(f.aimAngle);
+    const sin = Math.sin(f.aimAngle);
+    const activePlatforms = this.getActivePlatforms();
+
+    let sprayX = startX + cos * 28;
+    let sprayY = startY + sin * 20;
+    let surface: 'wall' | 'backdrop' = 'backdrop';
+    let wallId: string | undefined;
+
+    const clampToSurface = (
+      px: number,
+      py: number,
+      rx: number,
+      ry: number,
+      rw: number,
+      rh: number
+    ) => {
+      const cx = rw >= 60 ? Math.max(rx + 28, Math.min(rx + rw - 28, px)) : rx + rw / 2;
+      const cy = rh >= 48 ? Math.max(ry + 22, Math.min(ry + rh - 22, py)) : ry + rh / 2;
+      return { x: cx, y: cy };
+    };
+
+    // 1. Raycast along aim direction up to 130px for a solid wall, cover block, or destructible wall
+    for (let dist = 10; dist <= 130; dist += 6) {
+      const sx = startX + cos * dist;
+      const sy = startY + sin * dist;
+
+      for (const dw of this.destructibleWalls) {
+        if (!dw.alive) continue;
+        if (this.pointInRect(sx, sy, dw.x, dw.y, dw.w, dw.h)) {
+          const snapped = clampToSurface(sx, sy, dw.x, dw.y, dw.w, dw.h);
+          sprayX = snapped.x;
+          sprayY = snapped.y;
+          surface = 'wall';
+          wallId = dw.id;
+          break;
+        }
+      }
+      if (surface === 'wall') break;
+
+      for (const p of activePlatforms) {
+        if (p.kind === 'oneway' || p.w < 36 || p.h < 32) continue;
+        if (this.pointInRect(sx, sy, p.x, p.y, p.w, p.h)) {
+          const snapped = clampToSurface(sx, sy, p.x, p.y, p.w, p.h);
+          sprayX = snapped.x;
+          sprayY = snapped.y;
+          surface = 'wall';
+          wallId = p.id;
+          break;
+        }
+      }
+      if (surface === 'wall') break;
+    }
+
+    // 2. Fallback proximity check if standing right beside a vertical wall or cover block
+    if (surface === 'backdrop') {
+      let bestDist = 90;
+      for (const dw of this.destructibleWalls) {
+        if (!dw.alive) continue;
+        const clampedX = Math.max(dw.x, Math.min(dw.x + dw.w, startX));
+        const clampedY = Math.max(dw.y, Math.min(dw.y + dw.h, startY));
+        const d = Math.hypot(clampedX - startX, clampedY - startY);
+        if (d < bestDist) {
+          bestDist = d;
+          const snapped = clampToSurface(clampedX, clampedY, dw.x, dw.y, dw.w, dw.h);
+          sprayX = snapped.x;
+          sprayY = snapped.y;
+          surface = 'wall';
+          wallId = dw.id;
+        }
+      }
+      for (const p of activePlatforms) {
+        if (p.kind === 'oneway' || p.w < 44 || p.h < 42) continue;
+        const clampedX = Math.max(p.x, Math.min(p.x + p.w, startX));
+        const clampedY = Math.max(p.y, Math.min(p.y + p.h, startY));
+        const d = Math.hypot(clampedX - startX, clampedY - startY);
+        if (d < bestDist) {
+          bestDist = d;
+          const snapped = clampToSurface(clampedX, clampedY, p.x, p.y, p.w, p.h);
+          sprayX = snapped.x;
+          sprayY = snapped.y;
+          surface = 'wall';
+          wallId = p.id;
+        }
+      }
+    }
+
+    const sprayDef = SPRAY_DEFS.find((s) => s.id === sprayId) || SPRAY_DEFS[0];
+    this.wallSprays.push({
+      id: this.nextSprayId++,
+      x: sprayX,
+      y: sprayY,
+      sprayId,
+      ownerName: f.name,
+      life: 99999,
+      maxLife: 99999,
+      surface,
+      wallId,
+      rotation: (Math.random() - 0.5) * 0.16,
+      persistent: true,
+      ageSec: 0,
+    });
+    if (this.wallSprays.length > 32) this.wallSprays.shift();
+    this.spawnBurst(sprayX, sprayY, sprayDef.accent, 10, 145);
+  }
+
   private updateEmotesAndSprays(dt: number): void {
     for (const em of this.emotePopups) {
       em.life -= dt;
       const owner = this.fighters.find((f) => f.id === em.fighterId);
       if (owner && owner.alive) {
         em.x = owner.x;
-        em.y = owner.y - 50;
+        em.y = owner.y - 54;
       }
     }
     this.emotePopups = this.emotePopups.filter((em) => em.life > 0);
 
+    const aliveDestructibleIds = new Set(
+      this.destructibleWalls.filter((dw) => dw.alive).map((dw) => dw.id)
+    );
+    const destructibleIds = new Set(this.destructibleWalls.map((dw) => dw.id));
+
     for (const sp of this.wallSprays) {
-      sp.life -= dt;
+      sp.ageSec = (sp.ageSec ?? 0) + dt;
+      if (!sp.persistent) {
+        sp.life -= dt;
+      }
     }
-    this.wallSprays = this.wallSprays.filter((sp) => sp.life > 0);
+    this.wallSprays = this.wallSprays.filter((sp) => {
+      if (!sp.persistent && sp.life <= 0) return false;
+      if (sp.wallId) {
+        if (this.collapsedPlatformIds.has(sp.wallId)) return false;
+        if (destructibleIds.has(sp.wallId) && !aliveDestructibleIds.has(sp.wallId)) {
+          return false;
+        }
+      }
+      return true;
+    });
   }
 
   private hasLineOfSight(x1: number, y1: number, x2: number, y2: number): boolean {

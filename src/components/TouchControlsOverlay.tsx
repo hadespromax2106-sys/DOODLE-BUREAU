@@ -8,6 +8,8 @@ interface TouchControlsOverlayProps {
   grenades: number;
   grenadeType: GrenadeType;
   ultReady: boolean;
+  onOpenEmoteWheel?: () => void;
+  onOpenSprayWheel?: () => void;
 }
 
 export const TouchControlsOverlay: React.FC<TouchControlsOverlayProps> = ({
@@ -15,6 +17,8 @@ export const TouchControlsOverlay: React.FC<TouchControlsOverlayProps> = ({
   grenades,
   grenadeType,
   ultReady,
+  onOpenEmoteWheel,
+  onOpenSprayWheel,
 }) => {
   const [leftStick, setLeftStick] = useState({ dx: 0, dy: 0, active: false });
   const [rightStick, setRightStick] = useState({ dx: 0, dy: 0, active: false });
@@ -214,6 +218,74 @@ export const TouchControlsOverlay: React.FC<TouchControlsOverlayProps> = ({
           aria-label="Ultimate ability"
         >
           <Zap className="h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            engine?.triggerTouchButton('grapple');
+          }}
+          onClick={() => engine?.triggerTouchButton('grapple')}
+          className="flex h-10 px-2.5 items-center justify-center rounded-full border border-cyan-400/70 bg-slate-900/85 text-[10px] font-mono-tabular font-bold text-cyan-200 uppercase active:scale-95"
+        >
+          HOOK
+        </button>
+
+        <button
+          type="button"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            engine?.triggerTouchButton('dash_left');
+          }}
+          onClick={() => engine?.triggerTouchButton('dash_left')}
+          className="flex h-10 px-2 items-center justify-center rounded-full border border-sky-400/60 bg-slate-900/85 text-[10px] font-mono-tabular font-bold text-sky-200 active:scale-95"
+        >
+          &laquo;DASH
+        </button>
+
+        <button
+          type="button"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            engine?.triggerTouchButton('dash_right');
+          }}
+          onClick={() => engine?.triggerTouchButton('dash_right')}
+          className="flex h-10 px-2 items-center justify-center rounded-full border border-sky-400/60 bg-slate-900/85 text-[10px] font-mono-tabular font-bold text-sky-200 active:scale-95"
+        >
+          DASH&raquo;
+        </button>
+
+        <button
+          type="button"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            if (onOpenEmoteWheel) onOpenEmoteWheel();
+            else engine?.triggerTouchButton('emote');
+          }}
+          onClick={() => {
+            if (onOpenEmoteWheel) onOpenEmoteWheel();
+            else engine?.triggerTouchButton('emote');
+          }}
+          className="flex h-10 px-2 items-center justify-center rounded-full border border-amber-400/50 bg-slate-900/85 text-[10px] font-mono-tabular font-bold text-amber-200 active:scale-95"
+        >
+          EMOTE
+        </button>
+
+        <button
+          type="button"
+          onTouchStart={(e) => {
+            e.preventDefault();
+            if (onOpenSprayWheel) onOpenSprayWheel();
+            else engine?.triggerTouchButton('spray');
+          }}
+          onClick={() => {
+            if (onOpenSprayWheel) onOpenSprayWheel();
+            else engine?.triggerTouchButton('spray');
+          }}
+          className="flex h-10 px-2 items-center justify-center rounded-full border border-pink-400/50 bg-slate-900/85 text-[10px] font-mono-tabular font-bold text-pink-200 active:scale-95"
+        >
+          SPRAY
         </button>
 
         <button

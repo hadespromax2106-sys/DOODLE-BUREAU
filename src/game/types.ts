@@ -469,6 +469,11 @@ export interface WallSprayEntity {
   ownerName: string;
   life: number;
   maxLife: number;
+  surface?: 'wall' | 'backdrop';
+  wallId?: string;
+  rotation?: number;
+  persistent?: boolean;
+  ageSec?: number;
 }
 
 export interface EmotePopupEntity {

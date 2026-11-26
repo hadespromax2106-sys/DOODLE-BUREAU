@@ -8,6 +8,7 @@ import {
   Home,
   Maximize2,
   Minimize2,
+  Music,
   Play,
   RotateCcw,
   Scale,
@@ -40,16 +41,27 @@ import { MatchReplayModal } from './components/MatchReplayModal';
 import { OnlineRoomModal } from './components/OnlineRoomModal';
 import { PostMatchModal } from './components/PostMatchModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { RadialEmoteSprayWheel } from './components/RadialEmoteSprayWheel';
 import { SocialPartyDrawer } from './components/SocialPartyDrawer';
 import { SplashIntroOverlay } from './components/SplashIntroOverlay';
+import {
+  TournamentBracketModal,
+  advanceBracketWinner,
+} from './components/TournamentBracketModal';
 import { TouchControlsOverlay } from './components/TouchControlsOverlay';
+import {
+  MvpWinnerMeta,
+  VictoryMvpSpotlightModal,
+} from './components/VictoryMvpSpotlightModal';
 import {
   CHARACTERS,
   DEFAULT_CUSTOM_RULES,
   DEFAULT_FREE_CHARACTERS,
+  EMOTE_DEFS,
   GAME_MODE_CATALOG,
   MAP_CATALOG,
   MELEE_WEAPONS,
+  SPRAY_DEFS,
   WEAPONS,
   WEAPON_MASTERY_TIERS,
   getGameModeDef,
@@ -78,6 +90,7 @@ import { PeerRoomSession } from './net/peerRoom';
 import {
   CharacterId,
   CustomMatchRules,
+  EmoteId,
   FriendEntry,
   GameMode,
   HudSnapshot,
@@ -91,7 +104,12 @@ import {
   PlayerProfile,
   PlayerSlotIndex,
   ScreenState,
+  SprayId,
+  TournamentBracket,
+  TournamentMatch,
+  TournamentParticipant,
   VoteLobbyOption,
+  WeaponId,
   ZoomLevel,
 } from './types/game';
 
@@ -151,6 +169,7 @@ export default function App() {
   const [botCount, setBotCount] = useState<number>(4);
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(1);
   const [muted, setMuted] = useState<boolean>(false);
+  const [musicEnabled, setMusicEnabled] = useState<boolean>(() => soundEngine.isMusicEnabled());
 
   // Audio Unlock Splash & Deep-Link Party Invite
   const [audioUnlocked, setAudioUnlocked] = useState<boolean>(false);
@@ -202,6 +221,15 @@ export default function App() {
   const [showOnlineModal, setShowOnlineModal] = useState<boolean>(false);
   const [showSocialDrawer, setShowSocialDrawer] = useState<boolean>(false);
   const [showHowToPlay, setShowHowToPlay] = useState<boolean>(false);
+  const [showTournament, setShowTournament] = useState<boolean>(false);
+  const [tournamentBracket, setTournamentBracket] = useState<TournamentBracket | null>(null);
+  const [activeTournamentMatch, setActiveTournamentMatch] = useState<{
+    roundIndex: number;
+    matchIndex: number;
+    p1Id: string;
+    p2Id: string;
+  } | null>(null);
+  const [tournamentOpponent, setTournamentOpponent] = useState<TournamentParticipant | null>(null);
 
   // Friends & 4-Player Party Squad State
   const [aiRivals] = useState<FriendEntry[]>(() => getSampleAiRivals());
@@ -238,10 +266,17 @@ export default function App() {
   const [matchKey, setMatchKey] = useState<number>(0);
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [matchSummary, setMatchSummary] = useState<MatchSummary | null>(null);
+  const [mvpWinnerMeta, setMvpWinnerMeta] = useState<MvpWinnerMeta | undefined>(undefined);
   const [lastReplay, setLastReplay] = useState<MatchReplayData | null>(null);
   const [showReplay, setShowReplay] = useState<boolean>(false);
   const [lobbyAction, setLobbyAction] = useState<LobbyActionSignal | null>(null);
   const readyLaunchTimeoutRef = useRef<number | null>(null);
+
+  // In-Match Radial Emote (T) & Spray (Y) Wheel State
+  const [radialWheelMode, setRadialWheelMode] = useState<'emote' | 'spray' | null>(null);
+  const [radialHoverIndex, setRadialHoverIndex] = useState<number | null>(null);
+  const radialOpenedAtRef = useRef<number>(0);
+  const radialOpenedByKeyRef = useRef<'KeyT' | 'KeyY' | null>(null);
 
   const triggerLobbyAction = useCallback((type: LobbyActionSignal['type']) => {
     setLobbyAction((prev) => ({ type, seq: (prev?.seq || 0) + 1 }));
@@ -497,6 +532,28 @@ export default function App() {
       soundEngine.setMuted(next);
       return next;
     });
+  }, []);
+
+  const toggleMusic = useCallback(() => {
+    setMusicEnabled((prev) => {
+      const next = !prev;
+      soundEngine.setMusicEnabled(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (screen === 'PLAYING') {
+      soundEngine.startBattleMusic();
+    } else {
+      soundEngine.stopBattleMusic();
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    return () => {
+      soundEngine.stopBattleMusic();
+    };
   }, []);
 
   const handleChangeZoom = useCallback((nextZoom: ZoomLevel) => {
@@ -837,6 +894,82 @@ export default function App() {
         }
       }
 
+      // Compute MVP visual loadout metadata for the 3D Victory MVP Spotlight
+      const mvpFighter = [...rawSummary.standings].sort((a, b) => {
+        const kdrA = a.kills / Math.max(1, a.deaths);
+        const kdrB = b.kills / Math.max(1, b.deaths);
+        if (Math.abs(kdrB - kdrA) > 0.001) return kdrB - kdrA;
+        return b.kills - a.kills;
+      })[0];
+
+      if (mvpFighter) {
+        const topWeaponEntry = Object.entries(mvpFighter.weaponKills || {}).sort(
+          (a, b) => b[1] - a[1]
+        )[0];
+        const bestWeapon = (topWeaponEntry?.[0] as WeaponId | undefined) || undefined;
+        if (mvpFighter.playerIndex === 1) {
+          setMvpWinnerMeta({
+            characterId: p1Char,
+            outfitId: p1Profile.cosmetics.equippedOutfit,
+            flameId: p1Profile.cosmetics.equippedFlame,
+            weaponId: bestWeapon || p1Profile.cosmetics.equippedStartingWeapon,
+            weaponMastery:
+              p1Profile.masteryEquipped?.[p1Profile.cosmetics.equippedStartingWeapon] || 'gold',
+            gunWrap: p1Profile.cosmetics.equippedWrap || 'none',
+          });
+        } else if (mvpFighter.playerIndex === 2 && mode === 'versus_2p') {
+          setMvpWinnerMeta({
+            characterId: p2Char,
+            outfitId: p2Profile.cosmetics.equippedOutfit,
+            flameId: p2Profile.cosmetics.equippedFlame,
+            weaponId: bestWeapon || p2Profile.cosmetics.equippedStartingWeapon,
+            weaponMastery:
+              p2Profile.masteryEquipped?.[p2Profile.cosmetics.equippedStartingWeapon] || 'gold',
+            gunWrap: p2Profile.cosmetics.equippedWrap || 'none',
+          });
+        } else {
+          const matchedParty = partyMembers.find(
+            (m) => m.username === mvpFighter.name || m.playerTag === mvpFighter.name
+          );
+          setMvpWinnerMeta({
+            characterId: mvpFighter.characterId,
+            outfitId: matchedParty?.outfitId || 'charcoal',
+            flameId: matchedParty?.flameId || 'gold',
+            weaponId: bestWeapon || matchedParty?.startingWeapon || 'ak',
+            weaponMastery: matchedParty?.weaponMastery || 'gold',
+            gunWrap: matchedParty?.gunWrap || 'none',
+          });
+        }
+      } else {
+        setMvpWinnerMeta(undefined);
+      }
+
+      if (activeTournamentMatch) {
+        const p1Won = Boolean(localStanding && rawSummary.winnerId === localStanding.id);
+        const resolvedWinnerId = p1Won
+          ? activeTournamentMatch.p1Id === 'local_p1'
+            ? activeTournamentMatch.p1Id
+            : activeTournamentMatch.p2Id === 'local_p1'
+            ? activeTournamentMatch.p2Id
+            : activeTournamentMatch.p1Id
+          : activeTournamentMatch.p1Id === 'local_p1'
+          ? activeTournamentMatch.p2Id
+          : activeTournamentMatch.p1Id;
+        const oppStanding = rawSummary.standings.find((s) => s.id !== localStanding?.id);
+        const scoreStr = `${localStanding?.kills ?? 0}-${oppStanding?.kills ?? 0}`;
+        setTournamentBracket((prev) =>
+          prev
+            ? advanceBracketWinner(
+                prev,
+                activeTournamentMatch.roundIndex,
+                activeTournamentMatch.matchIndex,
+                resolvedWinnerId,
+                scoreStr
+              )
+            : prev
+        );
+      }
+
       setMatchSummary({
         ...rawSummary,
         p1Reward,
@@ -846,10 +979,43 @@ export default function App() {
       if (capturedReplay && capturedReplay.frames.length > 10 && capturedReplay.winningKillerId) {
         setScreen('KILL_CAM');
       } else {
-        setScreen('MATCH_SUMMARY');
+        setScreen('MVP_SPOTLIGHT');
       }
     },
-    [mode, localPeerSlot, p1Profile, p2Profile]
+    [mode, localPeerSlot, p1Profile, p2Profile, p1Char, p2Char, partyMembers, activeTournamentMatch]
+  );
+
+  const handleLaunchTournamentMatch = useCallback(
+    (match: TournamentMatch, bracket: TournamentBracket) => {
+      if (!match.p1 || !match.p2) return;
+      const opp = match.p2.id === 'local_p1' ? match.p1 : match.p2;
+      setTournamentBracket(bracket);
+      setActiveTournamentMatch({
+        roundIndex: match.roundIndex,
+        matchIndex: match.matchIndex,
+        p1Id: match.p1.id,
+        p2Id: match.p2.id,
+      });
+      setTournamentOpponent(opp);
+      setShowTournament(false);
+      setShowSocialDrawer(false);
+      setShowRulesPanel(false);
+      setMode('solo');
+      setBotCount(1);
+      setSelectedMapId(bracket.mapId);
+      setCustomRules((prev) => ({
+        ...prev,
+        gameMode: 'ffa',
+        durationSec: 120,
+      }));
+      soundEngine.unlock();
+      setShowReplay(false);
+      setLastReplay(null);
+      setMatchSummary(null);
+      setScreen('PLAYING');
+      setMatchKey((k) => k + 1);
+    },
+    []
   );
 
   useEffect(() => {
@@ -874,7 +1040,7 @@ export default function App() {
     if (!engineRef.current) {
       const engine = new ArenaGameEngine(canvas, {
         mode,
-        botCount,
+        botCount: activeTournamentMatch ? 1 : botCount,
         matchDurationSec: customRules.durationSec,
         mapId: selectedMapId,
         rules: customRules,
@@ -891,9 +1057,10 @@ export default function App() {
           mode === 'online_host' || mode === 'online_client'
             ? remotePeers.map((rp) => ({ slot: rp.slot, meta: rp.meta }))
             : undefined,
-        partyMembers,
+        partyMembers: activeTournamentMatch ? [] : partyMembers,
         localPlayerIndex: mode === 'online_client' ? localPeerSlot : 1,
         peerSession: peerSessionRef.current,
+        tournamentOpponent: tournamentOpponent || undefined,
         onHudUpdate: setHud,
         onMatchEnd: handleMatchEnd,
       });
@@ -914,8 +1081,127 @@ export default function App() {
   }, [screen]);
 
   useEffect(() => {
+    if (screen !== 'PLAYING' && radialWheelMode) {
+      setRadialWheelMode(null);
+      setRadialHoverIndex(null);
+    }
+  }, [screen, radialWheelMode]);
+
+  useEffect(() => {
+    engineRef.current?.setRadialMenuOpen(Boolean(radialWheelMode));
+  }, [radialWheelMode]);
+
+  const handleSelectEmote = useCallback((emoteId: EmoteId) => {
+    engineRef.current?.triggerEmote(emoteId);
+    setRadialWheelMode(null);
+    setRadialHoverIndex(null);
+  }, []);
+
+  const handleSelectSpray = useCallback((sprayId: SprayId) => {
+    engineRef.current?.triggerSpray(sprayId);
+    setRadialWheelMode(null);
+    setRadialHoverIndex(null);
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'PLAYING') return;
+
+    const onWheelKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') {
+        return;
+      }
+      if (e.repeat) return;
+
+      if (e.code === 'KeyT') {
+        e.preventDefault();
+        if (radialWheelMode === 'emote') {
+          if (radialHoverIndex !== null && EMOTE_DEFS[radialHoverIndex]) {
+            handleSelectEmote(EMOTE_DEFS[radialHoverIndex].id);
+          } else {
+            setRadialWheelMode(null);
+            setRadialHoverIndex(null);
+          }
+        } else {
+          radialOpenedAtRef.current = performance.now();
+          radialOpenedByKeyRef.current = 'KeyT';
+          setRadialHoverIndex(null);
+          setRadialWheelMode('emote');
+        }
+        return;
+      }
+
+      if (e.code === 'KeyY') {
+        e.preventDefault();
+        if (radialWheelMode === 'spray') {
+          if (radialHoverIndex !== null && SPRAY_DEFS[radialHoverIndex]) {
+            handleSelectSpray(SPRAY_DEFS[radialHoverIndex].id);
+          } else {
+            setRadialWheelMode(null);
+            setRadialHoverIndex(null);
+          }
+        } else {
+          radialOpenedAtRef.current = performance.now();
+          radialOpenedByKeyRef.current = 'KeyY';
+          setRadialHoverIndex(null);
+          setRadialWheelMode('spray');
+        }
+        return;
+      }
+
+      if (radialWheelMode) {
+        const digitMatch = /^(?:Digit|Numpad)([1-6])$/.exec(e.code);
+        if (digitMatch) {
+          e.preventDefault();
+          const idx = Number(digitMatch[1]) - 1;
+          if (radialWheelMode === 'emote' && EMOTE_DEFS[idx]) {
+            handleSelectEmote(EMOTE_DEFS[idx].id);
+          } else if (radialWheelMode === 'spray' && SPRAY_DEFS[idx]) {
+            handleSelectSpray(SPRAY_DEFS[idx].id);
+          }
+        }
+      }
+    };
+
+    const onWheelKeyUp = (e: KeyboardEvent) => {
+      if (!radialWheelMode) return;
+      if (
+        (e.code === 'KeyT' && radialWheelMode === 'emote' && radialOpenedByKeyRef.current === 'KeyT') ||
+        (e.code === 'KeyY' && radialWheelMode === 'spray' && radialOpenedByKeyRef.current === 'KeyY')
+      ) {
+        const heldMs = performance.now() - radialOpenedAtRef.current;
+        radialOpenedByKeyRef.current = null;
+        if (heldMs >= 200) {
+          if (radialHoverIndex !== null) {
+            if (radialWheelMode === 'emote' && EMOTE_DEFS[radialHoverIndex]) {
+              handleSelectEmote(EMOTE_DEFS[radialHoverIndex].id);
+            } else if (radialWheelMode === 'spray' && SPRAY_DEFS[radialHoverIndex]) {
+              handleSelectSpray(SPRAY_DEFS[radialHoverIndex].id);
+            }
+          } else {
+            setRadialWheelMode(null);
+            setRadialHoverIndex(null);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onWheelKeyDown);
+    window.addEventListener('keyup', onWheelKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onWheelKeyDown);
+      window.removeEventListener('keyup', onWheelKeyUp);
+    };
+  }, [screen, radialWheelMode, radialHoverIndex, handleSelectEmote, handleSelectSpray]);
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Escape') {
+        if (radialWheelMode) {
+          setRadialWheelMode(null);
+          setRadialHoverIndex(null);
+          return;
+        }
         if (
           authSlot ||
           showCharacterModal ||
@@ -925,6 +1211,7 @@ export default function App() {
           showRulesPanel ||
           showSocialDrawer ||
           showHowToPlay ||
+          showTournament ||
           showDisclaimer
         ) {
           setAuthSlot(null);
@@ -935,6 +1222,7 @@ export default function App() {
           setShowRulesPanel(false);
           setShowSocialDrawer(false);
           setShowHowToPlay(false);
+          setShowTournament(false);
           if (showDisclaimer) handleDismissDisclaimer();
           return;
         }
@@ -963,6 +1251,7 @@ export default function App() {
         !showRulesPanel &&
         !showSocialDrawer &&
         !showHowToPlay &&
+        !showTournament &&
         !showDisclaimer &&
         !pendingInviteCode
       ) {
@@ -976,6 +1265,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     screen,
+    radialWheelMode,
     audioUnlocked,
     authSlot,
     showCharacterModal,
@@ -986,6 +1276,7 @@ export default function App() {
     showRulesPanel,
     showSocialDrawer,
     showHowToPlay,
+    showTournament,
     showDisclaimer,
     disclaimerAcked,
     pendingInviteCode,
@@ -1006,6 +1297,8 @@ export default function App() {
     setShowReplay(false);
     setHud(null);
     setMatchSummary(null);
+    setActiveTournamentMatch(null);
+    setTournamentOpponent(null);
     if (mode === 'online_host' || mode === 'online_client') {
       setMode('solo');
     }
@@ -1324,6 +1617,20 @@ export default function App() {
               </button>
 
               <button
+                onClick={toggleMusic}
+                className={`rounded-lg border px-2.5 py-2 text-xs font-bold flex items-center gap-1 transition-colors ${
+                  musicEnabled
+                    ? 'border-cyan-500/60 bg-[#0B101B]/88 text-cyan-300 hover:border-cyan-400'
+                    : 'border-slate-700/80 bg-[#0B101B]/88 text-slate-400 hover:border-amber-500/70'
+                }`}
+                title={musicEnabled ? 'Battle Music On' : 'Battle Music Off'}
+                aria-label={musicEnabled ? 'Disable battle music' : 'Enable battle music'}
+              >
+                <Music className="h-4 w-4" />
+                <span className="hidden sm:inline">{musicEnabled ? 'Music' : 'Muted'}</span>
+              </button>
+
+              <button
                 onClick={toggleMute}
                 className="rounded-lg border border-slate-700/80 bg-[#0B101B]/88 p-2 text-slate-200 hover:border-amber-500/70 transition-colors"
                 aria-label={muted ? 'Unmute audio' : 'Mute audio'}
@@ -1416,22 +1723,28 @@ export default function App() {
                   </button>
                 </div>
 
-                <button
-                  onClick={() => setShowOnlineModal(true)}
-                  className={`w-full flex items-center justify-between rounded-lg border px-4 py-2.5 text-left whitespace-nowrap shrink-0 transition-colors ${
-                    peerStatus === 'connected'
-                      ? 'border-emerald-500/70 bg-emerald-950/75 text-emerald-200'
-                      : 'border-slate-700/75 bg-[#0B101B]/82 text-slate-100 hover:border-amber-500/70'
-                  }`}
-                >
-                  <span className="flex items-center gap-2.5 text-xs sm:text-sm font-bold uppercase tracking-wider">
-                    <Wifi className="h-4 w-4 text-amber-400 shrink-0" />
-                    Online Room
-                  </span>
-                  <span className="text-[11px] font-mono-tabular text-slate-300">
-                    {peerStatus === 'connected' ? `Room ${roomCode}` : '4-Letter WebRTC'}
-                  </span>
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setShowOnlineModal(true)}
+                    className={`flex items-center justify-between rounded-lg border px-3.5 py-2.5 text-left whitespace-nowrap shrink-0 transition-colors ${
+                      peerStatus === 'connected'
+                        ? 'border-emerald-500/70 bg-emerald-950/75 text-emerald-200'
+                        : 'border-slate-700/75 bg-[#0B101B]/82 text-slate-100 hover:border-amber-500/70'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide">
+                      <Wifi className="h-4 w-4 text-amber-400 shrink-0" />
+                      {peerStatus === 'connected' ? `Room ${roomCode}` : 'Online Room'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setShowTournament(true)}
+                    className="flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-[#0B101B]/82 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wide text-cyan-200 hover:border-cyan-400 whitespace-nowrap shrink-0 transition-colors"
+                  >
+                    <Crown className="h-4 w-4 text-amber-400 shrink-0" />
+                    Tournament
+                  </button>
+                </div>
               </nav>
             </div>
 
@@ -1816,8 +2129,8 @@ export default function App() {
             <div className="flex items-center justify-between gap-4 px-1 flex-wrap text-[11px] font-mono-tabular text-slate-400">
               <span>
                 {mode === 'versus_2p'
-                  ? 'P1: WASD + Space/F Fire + 1-3 Swap + V Melee + G Grenade · P2: Arrows + Enter/L Fire + . Swap'
-                  : 'WASD Move/Jet · Click Fire · 1-3 Weapon/Melee · V Strike · G/Tab Grenade · E/Shift Ult · R Reload · Z Zoom'}
+                  ? 'P1: WASD + Space/F Fire + 1-3 Swap + C Grapple + V Melee + G Grenade · P2: Arrows + Enter/L Fire + . Swap'
+                  : 'WASD Move/Jet · Double-Tap A/D Dash · Click Fire · R-Click/C Grapple · 1-3 Weapon · T/Y Emote/Spray · E Ult'}
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-slate-300 font-semibold">
@@ -1898,6 +2211,33 @@ export default function App() {
               grenades={localHudFighter?.grenades ?? 0}
               grenadeType={localHudFighter?.grenadeType ?? 'frag'}
               ultReady={(localHudFighter?.ultCharge ?? 0) >= 100}
+              onOpenEmoteWheel={() => {
+                radialOpenedByKeyRef.current = null;
+                setRadialHoverIndex(null);
+                setRadialWheelMode((prev) => (prev === 'emote' ? null : 'emote'));
+              }}
+              onOpenSprayWheel={() => {
+                radialOpenedByKeyRef.current = null;
+                setRadialHoverIndex(null);
+                setRadialWheelMode((prev) => (prev === 'spray' ? null : 'spray'));
+              }}
+            />
+          )}
+          {screen === 'PLAYING' && radialWheelMode && (
+            <RadialEmoteSprayWheel
+              mode={radialWheelMode}
+              hoveredIndex={radialHoverIndex}
+              onHoverIndexChange={setRadialHoverIndex}
+              onSelectEmote={handleSelectEmote}
+              onSelectSpray={handleSelectSpray}
+              onSwitchMode={(nextMode) => {
+                setRadialWheelMode(nextMode);
+                setRadialHoverIndex(null);
+              }}
+              onClose={() => {
+                setRadialWheelMode(null);
+                setRadialHoverIndex(null);
+              }}
             />
           )}
         </div>
@@ -1930,6 +2270,13 @@ export default function App() {
                 Vote New Map &amp; Restart
               </button>
               <button
+                onClick={toggleMusic}
+                className="w-full flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-800 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 transition-colors"
+              >
+                <Music className="h-4 w-4 text-cyan-400" />
+                {musicEnabled ? 'Battle Music: ON' : 'Battle Music: OFF'}
+              </button>
+              <button
                 onClick={toggleMute}
                 className="w-full flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-800 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 transition-colors"
               >
@@ -1952,7 +2299,16 @@ export default function App() {
       {screen === 'KILL_CAM' && lastReplay && (
         <KillCamOverlay
           replay={lastReplay}
-          onComplete={() => setScreen('MATCH_SUMMARY')}
+          onComplete={() => setScreen('MVP_SPOTLIGHT')}
+        />
+      )}
+
+      {/* ================= 3D VICTORY MVP SPOTLIGHT ================= */}
+      {screen === 'MVP_SPOTLIGHT' && matchSummary && (
+        <VictoryMvpSpotlightModal
+          summary={matchSummary}
+          winnerMeta={mvpWinnerMeta}
+          onContinue={() => setScreen('MATCH_SUMMARY')}
         />
       )}
 
@@ -2058,7 +2414,19 @@ export default function App() {
         onLeaveParty={handleDisconnectOnline}
         onToggleReady={handleTogglePartyReady}
         onSendChat={handleSendPartyChat}
+        onOpenTournament={() => setShowTournament(true)}
       />
+
+      {showTournament && (
+        <TournamentBracketModal
+          profile={p1Profile}
+          partyMembers={partyMembers}
+          existingBracket={tournamentBracket}
+          onUpdateBracket={setTournamentBracket}
+          onLaunchMatch={handleLaunchTournamentMatch}
+          onClose={() => setShowTournament(false)}
+        />
+      )}
 
       {showHowToPlay && <HowToPlayModal onClose={() => setShowHowToPlay(false)} />}
 
@@ -2136,6 +2504,13 @@ export default function App() {
         <PostMatchModal
           summary={matchSummary}
           hasReplay={Boolean(lastReplay && lastReplay.frames.length > 1)}
+          isTournamentMatch={Boolean(activeTournamentMatch)}
+          onReturnTournament={() => {
+            setActiveTournamentMatch(null);
+            setTournamentOpponent(null);
+            quitToLobby();
+            setShowTournament(true);
+          }}
           onWatchReplay={() => setShowReplay(true)}
           onPlayAgain={restartMatch}
           onReturnLobby={quitToLobby}

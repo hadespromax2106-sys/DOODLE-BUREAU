@@ -1381,15 +1381,35 @@ export const GUN_GAME_LADDER: WeaponId[] = [
   'bomberier',
 ];
 
-export const EMOTE_DEFS: Array<{ id: EmoteId; label: string; badge: string; color: string }> = [
-  { id: 'chai', label: 'Sipping Chai', badge: 'CHAI', color: '#F59E0B' },
-  { id: 'trophy', label: 'GG Trophy', badge: 'GG!', color: '#FACC15' },
-  { id: 'laugh_skull', label: 'Skull Laugh', badge: 'HAHA', color: '#22D3EE' },
+export const EMOTE_DEFS: Array<{
+  id: EmoteId;
+  label: string;
+  badge: string;
+  color: string;
+  subtitle: string;
+}> = [
+  { id: 'chai', label: 'Sipping Chai', badge: 'CHAI', color: '#F59E0B', subtitle: 'Hot & Steaming' },
+  { id: 'trophy', label: 'GG Trophy', badge: 'GG!', color: '#FACC15', subtitle: 'Pure Dominance' },
+  { id: 'laugh_skull', label: 'Skull Laugh', badge: 'HAHA', color: '#22D3EE', subtitle: 'Gotcha!' },
+  { id: 'dab_flex', label: 'Victory Flex', badge: 'FLEX', color: '#F43F5E', subtitle: 'Max Gains' },
+  { id: 'salute', label: 'Bureau Salute', badge: 'o7', color: '#38BDF8', subtitle: 'Respect Paid' },
+  { id: 'crown_king', label: 'Crown Drop', badge: 'KING', color: '#A855F7', subtitle: 'MVP Energy' },
 ];
 
-export const SPRAY_DEFS: Array<{ id: SprayId; title: string; subtitle: string; bg: string; fg: string }> = [
-  { id: 'chai_break', title: 'CHAI BREAK', subtitle: 'Doodle Bureau', bg: '#78350F', fg: '#FDE68A' },
-  { id: 'aim_404', title: '404 AIM', subtitle: 'NOT FOUND', bg: '#0F172A', fg: '#22D3EE' },
+export const SPRAY_DEFS: Array<{
+  id: SprayId;
+  title: string;
+  subtitle: string;
+  bg: string;
+  fg: string;
+  accent: string;
+}> = [
+  { id: 'chai_break', title: 'CHAI BREAK', subtitle: 'Doodle Bureau', bg: '#78350F', fg: '#FDE68A', accent: '#F59E0B' },
+  { id: 'aim_404', title: '404 AIM', subtitle: 'NOT FOUND', bg: '#0F172A', fg: '#22D3EE', accent: '#38BDF8' },
+  { id: 'doodle_crown', title: 'BUREAU KING', subtitle: 'CROWNED', bg: '#3B0764', fg: '#FACC15', accent: '#C084FC' },
+  { id: 'no_camping', title: 'NO CAMPING', subtitle: 'KEEP MOVING', bg: '#7F1D1D', fg: '#FCA5A5', accent: '#EF4444' },
+  { id: 'sniper_bait', title: 'EZ TARGET', subtitle: 'BULLSEYE', bg: '#064E3B', fg: '#6EE7B7', accent: '#10B981' },
+  { id: 'kadak_bolt', title: 'VOLTAGE', subtitle: 'HIGH SHOCK', bg: '#1E1B4B', fg: '#93C5FD', accent: '#60A5FA' },
 ];
 
 export const PROMO_CODES = {

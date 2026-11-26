@@ -266,7 +266,9 @@ export class ArenaRenderer {
 
     // Wall Sprays on Arena Backdrop
     for (const sp of extra.wallSprays || []) {
-      this.drawWallSpray(ctx, sp);
+      if (sp.surface !== 'wall') {
+        this.drawWallSpray(ctx, sp, elapsedSec);
+      }
     }
 
     // Platforms & Procedural Surface Textures (respecting collapsed outer ledges)
@@ -328,6 +330,13 @@ export class ArenaRenderer {
 
     for (const dw of destructibleWalls) {
       this.drawDestructibleWall(ctx, dw);
+    }
+
+    // Persistent Wall Sprays snapped onto solid walls, cover & destructible blocks
+    for (const sp of extra.wallSprays || []) {
+      if (sp.surface === 'wall') {
+        this.drawWallSpray(ctx, sp, elapsedSec);
+      }
     }
 
     for (const wall of tempWalls) {
@@ -466,7 +475,7 @@ export class ArenaRenderer {
 
     // Emote Popups, Comic Speech Bubbles & Floating Damage/Quip Texts
     for (const em of extra.emotePopups || []) {
-      this.drawEmotePopup(ctx, em);
+      this.drawEmotePopup(ctx, em, elapsedSec);
     }
     for (const f of fighters) {
       if (f.alive && f.speechTimer > 0 && f.speechText) {
@@ -2105,6 +2114,7 @@ export class ArenaRenderer {
       if (gunWrap === 'comic_halftone') return { fill: '#FACC15', trim: '#EC4899', accent: '#0F172A' };
       if (gunWrap === 'royal_gold') return { fill: '#D97706', trim: '#FDE047', accent: '#10B981' };
       if (gunWrap === 'galaxy_void') return { fill: '#3B0764', trim: '#C084FC', accent: '#38BDF8' };
+      if (gunWrap === 'golden_kettle') return { fill: '#F59E0B', trim: '#FEF08A', accent: '#EA580C' };
     }
     if (mastery === 'camo') return { fill: '#4D7C0F', trim: '#365314' };
     if (mastery === 'gold') return { fill: '#FACC15', trim: '#A16207' };
@@ -2116,7 +2126,8 @@ export class ArenaRenderer {
     ctx: CanvasRenderingContext2D,
     f: FighterEntity,
     elapsedSec: number,
-    isTeamMode = false
+    isTeamMode = false,
+    isNemesis = false
   ): void {
     const charDef = CHARACTERS.find((c) => c.id === f.characterId) || CHARACTERS[0];
     const outfit = OUTFIT_COSMETICS.find((o) => o.id === f.outfitId) || OUTFIT_COSMETICS[0];
@@ -2130,11 +2141,20 @@ export class ArenaRenderer {
     const cx = f.x;
     const footY = f.y + f.h / 2;
     const bodyCenterY = f.y + 4;
+    const visualScale = f.isBoss ? 1.62 : f.megaSizeTimer > 0 ? 1.42 : f.shrinkTimer > 0 ? 0.56 : 1.0;
 
     ctx.save();
     if (f.spawnInvulnTimer > 0 && Math.floor(elapsedSec * 16) % 2 === 0) {
       ctx.globalAlpha = 0.55;
     }
+
+    ctx.save();
+    ctx.translate(cx, footY);
+    ctx.scale(visualScale, visualScale);
+    if (f.isLastStand) {
+      ctx.translate(0, 12);
+    }
+    ctx.translate(-cx, -footY);
 
     if (isTeamMode && f.team) {
       const teamRing = f.team === 'alpha' ? 'rgba(244, 63, 94, 0.78)' : 'rgba(56, 189, 248, 0.78)';
@@ -2279,6 +2299,31 @@ export class ArenaRenderer {
       ctx.lineWidth = 2.4;
       ctx.beginPath();
       ctx.arc(cx, f.y - 4, 33 + Math.sin(elapsedSec * 8) * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (f.bubbleShieldHp > 0 && f.bubbleShieldTimer > 0) {
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.16)';
+      ctx.strokeStyle = 'rgba(192, 132, 252, 0.95)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, f.y - 4, 38 + Math.sin(elapsedSec * 10) * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (f.isVip) {
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, f.y - 4, 34 + Math.sin(elapsedSec * 7) * 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (f.isBoss) {
+      ctx.fillStyle = 'rgba(139, 92, 246, 0.12)';
+      ctx.strokeStyle = 'rgba(244, 63, 94, 0.88)';
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.arc(cx, f.y - 4, 36 + Math.sin(elapsedSec * 6) * 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
@@ -2945,6 +2990,16 @@ export class ArenaRenderer {
         }
         ctx.fillStyle = skin.accent || '#F59E0B';
         ctx.fillRect(weapon.length - 6 - kick, -5, 4, 9);
+      } else if (f.weaponId === 'orbital_laser') {
+        const skin = this.getWeaponBodyColor('#FEF08A', f.weaponMastery, f.gunWrap);
+        ctx.fillStyle = skin.fill;
+        ctx.fillRect(2 - kick, -5, weapon.length, 9);
+        ctx.strokeRect(2 - kick, -5, weapon.length, 9);
+        ctx.fillStyle = '#22D3EE';
+        ctx.fillRect(10 - kick, -2.5, weapon.length - 10, 4);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(weapon.length - 4 - kick, -6, 6, 11);
+        ctx.strokeRect(weapon.length - 4 - kick, -6, 6, 11);
       } else if (f.weaponId === 'plasma_repeater') {
         const skin = this.getWeaponBodyColor('#0F172A', f.weaponMastery, f.gunWrap);
         ctx.fillStyle = skin.fill;
@@ -3119,17 +3174,31 @@ export class ArenaRenderer {
       ctx.restore();
     }
 
-    const tagY = headY - 30;
-    const barW = 46;
-    const barH = 5.5;
+    // End scaled fighter body transform before rendering crisp HUD tags
+    ctx.restore();
+
+    const scaledHeadOffset = (footY - (headY - 22)) * visualScale;
+    const tagY = footY - scaledHeadOffset - (f.isLastStand ? 4 : 10);
+    const barW = f.isBoss ? 86 : 46;
+    const barH = f.isBoss ? 7 : 5.5;
     const hpRatio = Math.max(0, Math.min(1, f.hp / f.maxHp));
 
     ctx.fillStyle = 'rgba(11, 16, 27, 0.85)';
     ctx.fillRect(cx - barW / 2 - 1, tagY - 1, barW + 2, barH + 2);
-    ctx.fillStyle = hpRatio > 0.5 ? '#10B981' : hpRatio > 0.25 ? '#F59E0B' : '#EF4444';
+    ctx.fillStyle = f.isLastStand
+      ? '#EF4444'
+      : hpRatio > 0.5
+      ? '#10B981'
+      : hpRatio > 0.25
+      ? '#F59E0B'
+      : '#EF4444';
     ctx.fillRect(cx - barW / 2, tagY, barW * hpRatio, barH);
 
-    if (f.shieldHp > 0 && f.shieldBuffTimer > 0) {
+    if (f.bubbleShieldHp > 0 && f.bubbleShieldTimer > 0) {
+      const bRatio = Math.max(0, Math.min(1, f.bubbleShieldHp / 120));
+      ctx.fillStyle = '#C084FC';
+      ctx.fillRect(cx - barW / 2, tagY - 4, barW * bRatio, 2.5);
+    } else if (f.shieldHp > 0 && f.shieldBuffTimer > 0) {
       const shRatio = Math.max(0, Math.min(1, f.shieldHp / 60));
       ctx.fillStyle = '#38BDF8';
       ctx.fillRect(cx - barW / 2, tagY - 4, barW * shRatio, 2.5);
@@ -3141,12 +3210,38 @@ export class ArenaRenderer {
       ctx.fillRect(cx - barW / 2, tagY + barH + 2, barW * rProg, 2.5);
     }
 
+    if (f.isLastStand) {
+      ctx.font = '900 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#F87171';
+      ctx.fillText(`LAST STAND ${f.lastStandTimer.toFixed(1)}s`, cx, tagY - 18);
+    } else if (isNemesis) {
+      ctx.font = '900 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#F43F5E';
+      ctx.fillText('☠ NEMESIS +500', cx, tagY - 18);
+    } else if (f.isVip) {
+      ctx.font = '900 10px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#FACC15';
+      ctx.fillText('★ VIP (2x PTS)', cx, tagY - 18);
+    } else if (f.isBoss) {
+      ctx.font = '900 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#C084FC';
+      ctx.fillText(`RAID BOSS (${Math.round(f.hp)} HP)`, cx, tagY - 18);
+    }
+
     ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'center';
     const labelText = `${'★'.repeat(Math.min(3, f.rank.stars))} ${f.name}`;
     ctx.fillStyle = '#0B101B';
     ctx.fillText(labelText, cx + 1, tagY - 5);
-    ctx.fillStyle = isTeamMode
+    ctx.fillStyle = f.isVip
+      ? '#FACC15'
+      : f.isBoss
+      ? '#E879F9'
+      : isTeamMode
       ? f.team === 'bravo'
         ? '#7DD3FC'
         : f.isHuman
@@ -3498,5 +3593,801 @@ export class ArenaRenderer {
     ctx.arc(x, y, 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+  }
+
+  private drawPortalPair(
+    ctx: CanvasRenderingContext2D,
+    pt: PortalRenderState,
+    elapsedSec: number
+  ): void {
+    const drawGate = (x: number, y: number, primary: string, secondary: string) => {
+      ctx.save();
+      ctx.translate(x, y);
+      const pulse = 1 + Math.sin(elapsedSec * 5 + pt.pulse) * 0.08;
+      ctx.scale(pulse, pulse);
+      const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, pt.radius);
+      grad.addColorStop(0, '#FFFFFF');
+      grad.addColorStop(0.45, primary);
+      grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pt.radius * 0.72, pt.radius * 1.15, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = secondary;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pt.radius * 0.72, pt.radius * 1.15, 0, elapsedSec * 3, elapsedSec * 3 + Math.PI * 1.4);
+      ctx.stroke();
+      ctx.restore();
+    };
+    drawGate(pt.aX, pt.aY, '#38BDF8', '#0284C7');
+    drawGate(pt.bX, pt.bY, '#FB923C', '#EA580C');
+  }
+
+  private drawJumpPad(
+    ctx: CanvasRenderingContext2D,
+    jp: JumpPadRenderState,
+    elapsedSec: number
+  ): void {
+    ctx.save();
+    const lift = (1 - jp.compress) * 6;
+    ctx.fillStyle = '#1E293B';
+    ctx.fillRect(jp.x + 4, jp.y - 6, jp.w - 8, 8);
+    ctx.strokeStyle = '#64748B';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(jp.x + 12, jp.y);
+    ctx.lineTo(jp.x + jp.w / 2, jp.y - 4 - lift);
+    ctx.lineTo(jp.x + jp.w - 12, jp.y);
+    ctx.stroke();
+
+    const glow = 0.75 + 0.25 * Math.sin(elapsedSec * 7);
+    ctx.fillStyle = `rgba(34, 211, 238, ${glow})`;
+    ctx.strokeStyle = '#0B101B';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(jp.x, jp.y - 10 - lift, jp.w, 8, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawWindVent(
+    ctx: CanvasRenderingContext2D,
+    wv: WindVentRenderState,
+    elapsedSec: number
+  ): void {
+    ctx.save();
+    const grad = ctx.createLinearGradient(0, wv.y, 0, wv.y - wv.height);
+    grad.addColorStop(0, 'rgba(34, 211, 238, 0.28)');
+    grad.addColorStop(1, 'rgba(34, 211, 238, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(wv.x, wv.y - wv.height, wv.w, wv.height);
+
+    ctx.strokeStyle = 'rgba(165, 243, 252, 0.55)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const lx = wv.x + 10 + (i * (wv.w - 20)) / 3;
+      const offset = ((elapsedSec * 220 + i * 70) % wv.height);
+      const sy = wv.y - offset;
+      ctx.beginPath();
+      ctx.moveTo(lx, sy);
+      ctx.lineTo(lx, Math.max(wv.y - wv.height, sy - 28));
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#334155';
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineWidth = 2;
+    ctx.fillRect(wv.x, wv.y - 6, wv.w, 8);
+    ctx.strokeRect(wv.x, wv.y - 6, wv.w, 8);
+    ctx.restore();
+  }
+
+  private drawGlassFloor(
+    ctx: CanvasRenderingContext2D,
+    gf: GlassFloorRenderState,
+    elapsedSec: number
+  ): void {
+    ctx.save();
+    if (!gf.alive) {
+      ctx.strokeStyle = 'rgba(186, 230, 253, 0.28)';
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(gf.x, gf.y, gf.w, gf.h);
+      ctx.restore();
+      return;
+    }
+
+    ctx.fillStyle = 'rgba(125, 211, 252, 0.42)';
+    ctx.fillRect(gf.x, gf.y, gf.w, gf.h);
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.25 + 0.1 * Math.sin(elapsedSec * 4)})`;
+    ctx.fillRect(gf.x + 6, gf.y + 2, gf.w - 12, 3);
+
+    if (gf.cracks > 0) {
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gf.x + gf.w * 0.25, gf.y);
+      ctx.lineTo(gf.x + gf.w * 0.48, gf.y + gf.h * 0.6);
+      ctx.lineTo(gf.x + gf.w * 0.65, gf.y + gf.h);
+      ctx.moveTo(gf.x + gf.w * 0.48, gf.y + gf.h * 0.6);
+      ctx.lineTo(gf.x + gf.w * 0.72, gf.y + 2);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#E0F2FE';
+    ctx.lineWidth = 1.8;
+    ctx.strokeRect(gf.x, gf.y, gf.w, gf.h);
+    ctx.restore();
+  }
+
+  private drawSecurityTurret(
+    ctx: CanvasRenderingContext2D,
+    t: TurretHudState,
+    elapsedSec: number
+  ): void {
+    // Hacking Terminal Console
+    ctx.save();
+    const color = t.ownerId ? '#22D3EE' : '#F43F5E';
+    ctx.fillStyle = '#0F172A';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(t.terminalX - 16, t.terminalY - 28, 32, 28, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.fillRect(t.terminalX - 10, t.terminalY - 22, 20, 10);
+
+    if (t.hackProgress > 0) {
+      ctx.strokeStyle = '#22D3EE';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(
+        t.terminalX,
+        t.terminalY - 38,
+        14,
+        -Math.PI / 2,
+        -Math.PI / 2 + t.hackProgress * Math.PI * 2
+      );
+      ctx.stroke();
+    }
+    ctx.font = '800 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#F8FAFC';
+    ctx.fillText(
+      t.ownerName ? `TURRET: ${t.ownerName.slice(0, 10)}` : 'HACK TERMINAL (3s)',
+      t.terminalX,
+      t.terminalY - 35
+    );
+    ctx.restore();
+
+    // Ceiling Turret Mount & Barrel
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.fillStyle = '#1E293B';
+    ctx.strokeStyle = '#0B101B';
+    ctx.lineWidth = 2;
+    ctx.fillRect(-16, -6, 32, 12);
+    ctx.strokeRect(-16, -6, 32, 12);
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, 8, 12, 0, Math.PI);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.rotate(t.aimAngle);
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(0, -4, 24, 8);
+    ctx.strokeRect(0, -4, 24, 8);
+    if (t.muzzleFlashTimer > 0) {
+      ctx.fillStyle = '#FEF08A';
+      ctx.beginPath();
+      ctx.arc(26, 0, 7 + Math.sin(elapsedSec * 40) * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawSubwayTrain(
+    ctx: CanvasRenderingContext2D,
+    map: ArenaMap,
+    tr: SubwayTrainHudState,
+    elapsedSec: number
+  ): void {
+    const track = map.subwayTrack;
+    if (!track) return;
+
+    ctx.save();
+    // Steel track rails
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(track.minX, track.y - 4, track.maxX - track.minX, 4);
+
+    if (!tr.active && tr.warningTimerSec > 0) {
+      const blink = Math.floor(elapsedSec * 10) % 2 === 0;
+      ctx.fillStyle = blink ? 'rgba(239, 68, 68, 0.32)' : 'rgba(245, 158, 11, 0.16)';
+      ctx.fillRect(track.minX, track.y - tr.h, track.maxX - track.minX, tr.h);
+      ctx.font = '900 14px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = blink ? '#FCA5A5' : '#FDE047';
+      ctx.fillText('⚠ SUBWAY EXPRESS INCOMING ⚠', map.width / 2, track.y - 26);
+    }
+
+    if (tr.active) {
+      const carW = tr.w / tr.carCount;
+      const topY = tr.y - tr.h;
+      for (let i = 0; i < tr.carCount; i++) {
+        const cx = tr.x + i * carW + 4;
+        const cw = carW - 8;
+        ctx.fillStyle = '#1E293B';
+        ctx.strokeStyle = '#0F172A';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.roundRect(cx, topY, cw, tr.h - 6, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        // Gold safety stripe & lit windows
+        ctx.fillStyle = '#F59E0B';
+        ctx.fillRect(cx + 2, topY + tr.h - 20, cw - 4, 5);
+        ctx.fillStyle = '#38BDF8';
+        for (let wx = cx + 14; wx < cx + cw - 20; wx += 32) {
+          ctx.fillRect(wx, topY + 12, 20, 16);
+        }
+        // Roof rail for riding!
+        ctx.fillStyle = '#94A3B8';
+        ctx.fillRect(cx + 8, topY - 3, cw - 16, 4);
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawGoldenAirdrop(
+    ctx: CanvasRenderingContext2D,
+    ad: GoldenAirdropHudState,
+    elapsedSec: number
+  ): void {
+    ctx.save();
+    ctx.translate(ad.x, ad.y);
+    if (!ad.landed) {
+      ctx.strokeStyle = '#E2E8F0';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-24, -44);
+      ctx.lineTo(-10, -14);
+      ctx.moveTo(24, -44);
+      ctx.lineTo(10, -14);
+      ctx.stroke();
+      ctx.fillStyle = '#F59E0B';
+      ctx.beginPath();
+      ctx.arc(0, -44, 26, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const pulse = 26 + Math.sin(elapsedSec * 7) * 4;
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.25)';
+    ctx.beginPath();
+    ctx.arc(0, 0, pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#F59E0B';
+    ctx.strokeStyle = '#FEF08A';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.roundRect(-16, -16, 32, 32, 5);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = '900 10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FEF08A';
+    ctx.fillText('ORBITAL LASER', 0, -22);
+    ctx.restore();
+  }
+
+  private drawWallSpray(
+    ctx: CanvasRenderingContext2D,
+    sp: WallSprayHudState,
+    elapsedSec: number
+  ): void {
+    const def = SPRAY_DEFS.find((s) => s.id === sp.sprayId) || SPRAY_DEFS[0];
+    const age = sp.ageSec ?? 1;
+    const popScale = age < 0.16 ? 0.45 + 0.55 * (age / 0.16) : 1;
+    const baseAlpha = sp.persistent
+      ? sp.surface === 'wall'
+        ? 0.94
+        : 0.78
+      : Math.max(0.15, Math.min(0.9, sp.life / 4));
+
+    ctx.save();
+    ctx.globalAlpha = baseAlpha;
+    ctx.translate(sp.x, sp.y);
+    ctx.rotate(sp.rotation ?? -0.06);
+    ctx.scale(popScale, popScale);
+
+    // Overspray mist aura
+    const mist = ctx.createRadialGradient(0, 0, 10, 0, 0, 48);
+    mist.addColorStop(0, `${def.accent}55`);
+    mist.addColorStop(0.65, `${def.bg}44`);
+    mist.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = mist;
+    ctx.beginPath();
+    ctx.arc(0, 0, 48, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Deterministic overspray speckles
+    ctx.fillStyle = def.accent;
+    for (let i = 0; i < 10; i++) {
+      const ang = ((sp.id * 37 + i * 71) % 360) * (Math.PI / 180);
+      const rad = 30 + ((sp.id * 13 + i * 19) % 16);
+      const sz = 1.1 + ((i + sp.id) % 3) * 0.7;
+      ctx.beginPath();
+      ctx.arc(Math.cos(ang) * rad, Math.sin(ang) * rad * 0.78, sz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Main stencil decal plate
+    ctx.fillStyle = def.bg;
+    ctx.strokeStyle = def.fg;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.roundRect(-42, -26, 84, 52, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    // Inner stencil highlight border
+    ctx.strokeStyle = def.accent;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.roundRect(-38, -22, 76, 44, 7);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Custom graffiti artwork per sprayId
+    ctx.save();
+    ctx.translate(0, -6);
+    if (sp.sprayId === 'chai_break') {
+      // Steaming stencil chai glass
+      ctx.fillStyle = def.fg;
+      ctx.beginPath();
+      ctx.moveTo(-9, -4);
+      ctx.lineTo(9, -4);
+      ctx.lineTo(7, 10);
+      ctx.lineTo(-7, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = def.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-4, -8);
+      ctx.quadraticCurveTo(-7, -12, -3, -15);
+      ctx.moveTo(3, -8);
+      ctx.quadraticCurveTo(0, -12, 4, -15);
+      ctx.stroke();
+    } else if (sp.sprayId === 'aim_404') {
+      // Broken crosshair with X
+      ctx.strokeStyle = def.fg;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.moveTo(-14, 0);
+      ctx.lineTo(-7, 0);
+      ctx.moveTo(7, 0);
+      ctx.lineTo(14, 0);
+      ctx.moveTo(0, -14);
+      ctx.lineTo(0, -7);
+      ctx.moveTo(0, 7);
+      ctx.lineTo(0, 14);
+      ctx.stroke();
+      ctx.strokeStyle = '#EF4444';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-5, -5);
+      ctx.lineTo(5, 5);
+      ctx.moveTo(5, -5);
+      ctx.lineTo(-5, 5);
+      ctx.stroke();
+    } else if (sp.sprayId === 'doodle_crown') {
+      // Royal 3-peak crown
+      ctx.fillStyle = def.fg;
+      ctx.strokeStyle = def.accent;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-12, 8);
+      ctx.lineTo(-14, -6);
+      ctx.lineTo(-6, 1);
+      ctx.lineTo(0, -10);
+      ctx.lineTo(6, 1);
+      ctx.lineTo(14, -6);
+      ctx.lineTo(12, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (sp.sprayId === 'no_camping') {
+      // Tent inside prohibition circle
+      ctx.fillStyle = def.fg;
+      ctx.beginPath();
+      ctx.moveTo(-9, 7);
+      ctx.lineTo(0, -7);
+      ctx.lineTo(9, 7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#EF4444';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 12, 0, Math.PI * 2);
+      ctx.moveTo(-8.5, -8.5);
+      ctx.lineTo(8.5, 8.5);
+      ctx.stroke();
+    } else if (sp.sprayId === 'sniper_bait') {
+      // Target bullseye rings
+      ctx.strokeStyle = def.fg;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 11, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#FACC15';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // kadak_bolt lightning bolt
+      ctx.fillStyle = '#FACC15';
+      ctx.strokeStyle = def.fg;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(2, -12);
+      ctx.lineTo(-8, 1);
+      ctx.lineTo(-1, 1);
+      ctx.lineTo(-4, 12);
+      ctx.lineTo(9, -2);
+      ctx.lineTo(2, -2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Paint drips easing down from bottom edge
+    const dripProgress = Math.min(1, age / 0.85);
+    ctx.fillStyle = def.accent;
+    const drips = [
+      { x: -24, maxH: 10 },
+      { x: 6, maxH: 14 },
+      { x: 26, maxH: 8 },
+    ];
+    for (const d of drips) {
+      const len = d.maxH * dripProgress;
+      ctx.beginPath();
+      ctx.roundRect(d.x - 1.5, 25, 3, len, 1.5);
+      ctx.fill();
+    }
+
+    // Title & artist tag
+    ctx.font = '900 9.5px "Plus Jakarta Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = def.fg;
+    ctx.fillText(def.title, 0, 12);
+
+    ctx.font = '700 7px "JetBrains Mono", monospace';
+    ctx.fillStyle = 'rgba(248, 250, 252, 0.78)';
+    const tag = sp.ownerName.slice(0, 12);
+    ctx.fillText(tag, 0, 21);
+
+    // Fresh wet-paint gloss sweep in the first second
+    if (age < 1.1) {
+      const glossAlpha = (1 - age / 1.1) * 0.45;
+      ctx.fillStyle = `rgba(255,255,255,${glossAlpha.toFixed(2)})`;
+      const sweepX = -32 + (age / 1.1) * 64;
+      ctx.beginPath();
+      ctx.roundRect(sweepX - 5, -20, 10, 40, 4);
+      ctx.fill();
+    }
+
+    // Subtle idle shimmer for persistent wall decals
+    if (sp.surface === 'wall' && Math.sin(elapsedSec * 2 + sp.id) > 0.96) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(-42, -26, 84, 52, 10);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  private drawEmotePopup(
+    ctx: CanvasRenderingContext2D,
+    em: EmotePopupHudState,
+    elapsedSec: number
+  ): void {
+    const def = EMOTE_DEFS.find((e) => e.id === em.emoteId) || EMOTE_DEFS[0];
+    const age = em.maxLife - em.life;
+    const popScale =
+      age < 0.22
+        ? 0.35 + 0.85 * Math.sin((age / 0.22) * (Math.PI / 2))
+        : age < 0.34
+        ? 1.2 - 0.2 * ((age - 0.22) / 0.12)
+        : 1;
+    const bobY = Math.sin(elapsedSec * 7 + em.id) * 4;
+    const fadeAlpha = em.life < 0.35 ? Math.max(0, em.life / 0.35) : 1;
+
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    ctx.translate(em.x, em.y + bobY - 12);
+    ctx.scale(popScale, popScale);
+
+    // Speech pointer tail
+    ctx.fillStyle = '#0F172A';
+    ctx.strokeStyle = def.color;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-6, 17);
+    ctx.lineTo(0, 26);
+    ctx.lineTo(6, 17);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Glowing emote medallion backdrop
+    ctx.fillStyle = '#0F172A';
+    ctx.beginPath();
+    ctx.arc(0, -4, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Animated inner ring
+    ctx.strokeStyle = `${def.color}55`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, -4, 19 + Math.sin(elapsedSec * 9) * 1.4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Animated vector sprite per emoteId
+    ctx.save();
+    ctx.translate(0, -5);
+    if (em.emoteId === 'chai') {
+      const tilt = Math.sin(elapsedSec * 8) * 0.12;
+      ctx.rotate(tilt);
+      ctx.fillStyle = '#F59E0B';
+      ctx.strokeStyle = '#FEF3C7';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-8, -3);
+      ctx.lineTo(8, -3);
+      ctx.lineTo(6, 10);
+      ctx.lineTo(-6, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Rising animated steam waves
+      const steamOffset = (elapsedSec * 14) % 8;
+      ctx.strokeStyle = 'rgba(254, 243, 199, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-3, -6 - steamOffset * 0.4);
+      ctx.quadraticCurveTo(-6, -11 - steamOffset * 0.4, -2, -15 - steamOffset * 0.4);
+      ctx.moveTo(3, -5 - steamOffset * 0.4);
+      ctx.quadraticCurveTo(6, -10 - steamOffset * 0.4, 2, -14 - steamOffset * 0.4);
+      ctx.stroke();
+    } else if (em.emoteId === 'trophy') {
+      const pulse = 1 + Math.sin(elapsedSec * 10) * 0.08;
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = '#FACC15';
+      ctx.strokeStyle = '#FEF08A';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-9, -8);
+      ctx.lineTo(9, -8);
+      ctx.lineTo(6, 3);
+      ctx.lineTo(2, 5);
+      ctx.lineTo(2, 9);
+      ctx.lineTo(6, 11);
+      ctx.lineTo(-6, 11);
+      ctx.lineTo(-2, 9);
+      ctx.lineTo(-2, 5);
+      ctx.lineTo(-6, 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Orbiting star glints
+      const sx = Math.cos(elapsedSec * 6) * 13;
+      const sy = Math.sin(elapsedSec * 6) * 10 - 2;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (em.emoteId === 'laugh_skull') {
+      const chatter = Math.abs(Math.sin(elapsedSec * 18)) * 3;
+      ctx.fillStyle = '#E2E8F0';
+      ctx.beginPath();
+      ctx.arc(0, -3, 9, Math.PI, 0);
+      ctx.lineTo(9, 4);
+      ctx.lineTo(-9, 4);
+      ctx.closePath();
+      ctx.fill();
+      // Jaw chatter
+      ctx.fillRect(-5, 4 + chatter, 10, 4);
+      // Glowing cyan eyes
+      ctx.fillStyle = '#0F172A';
+      ctx.beginPath();
+      ctx.arc(-3.5, -2, 2.2, 0, Math.PI * 2);
+      ctx.arc(3.5, -2, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (em.emoteId === 'dab_flex') {
+      const flexBounce = Math.sin(elapsedSec * 11) * 0.14;
+      ctx.rotate(flexBounce);
+      ctx.strokeStyle = '#FDA4AF';
+      ctx.fillStyle = '#F43F5E';
+      ctx.lineWidth = 2;
+      // Flexing arm silhouette
+      ctx.beginPath();
+      ctx.arc(0, -1, 7, Math.PI * 0.9, Math.PI * 2.1);
+      ctx.lineTo(10, 7);
+      ctx.lineTo(-9, 7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#FEF08A';
+      ctx.beginPath();
+      ctx.arc(7, -6, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (em.emoteId === 'salute') {
+      const wave = Math.sin(elapsedSec * 9) * 2;
+      // Bureau helmet + visor + salute chevron
+      ctx.fillStyle = '#38BDF8';
+      ctx.beginPath();
+      ctx.arc(-2, -1, 8, Math.PI, 0);
+      ctx.lineTo(6, 5);
+      ctx.lineTo(-10, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#0F172A';
+      ctx.fillRect(-8, -1, 12, 3);
+      ctx.strokeStyle = '#FACC15';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(6, 6 + wave * 0.3);
+      ctx.lineTo(11, -3 + wave * 0.3);
+      ctx.stroke();
+    } else {
+      // crown_king
+      const tilt = Math.sin(elapsedSec * 7) * 0.12;
+      ctx.rotate(tilt);
+      ctx.fillStyle = '#FACC15';
+      ctx.strokeStyle = '#C084FC';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-10, 7);
+      ctx.lineTo(-12, -5);
+      ctx.lineTo(-5, 1);
+      ctx.lineTo(0, -9);
+      ctx.lineTo(5, 1);
+      ctx.lineTo(12, -5);
+      ctx.lineTo(10, 7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#EC4899';
+      ctx.beginPath();
+      ctx.arc(0, 2, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Crisp bottom badge pill
+    ctx.fillStyle = '#0B101B';
+    ctx.strokeStyle = def.color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(-24, 10, 48, 13, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = '900 8.5px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = def.color;
+    ctx.fillText(def.badge, 0, 16.8);
+
+    ctx.restore();
+  }
+
+  private drawHologramClone(
+    ctx: CanvasRenderingContext2D,
+    h: HologramRenderState,
+    elapsedSec: number
+  ): void {
+    ctx.save();
+    ctx.globalAlpha = 0.55 + Math.sin(elapsedSec * 16) * 0.15;
+    ctx.strokeStyle = '#22D3EE';
+    ctx.fillStyle = 'rgba(34, 211, 238, 0.28)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(h.x - 11, h.y - 12, 22, 34, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(h.x, h.y - 22, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = '800 9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#67E8F9';
+    ctx.fillText('HOLO DECOY', h.x, h.y - 40);
+    ctx.restore();
+  }
+
+  private drawBlackoutOverlay(
+    ctx: CanvasRenderingContext2D,
+    vx: number,
+    vy: number,
+    vw: number,
+    vh: number,
+    cam: CameraState,
+    fighters: FighterEntity[],
+    projectiles: ProjectileEntity[],
+    extra: ExtraRenderState
+  ): void {
+    if (typeof document === 'undefined') return;
+    if (!this.darknessCanvas) {
+      this.darknessCanvas = document.createElement('canvas');
+    }
+    const dc = this.darknessCanvas;
+    if (dc.width !== vw || dc.height !== vh) {
+      dc.width = Math.max(1, vw);
+      dc.height = Math.max(1, vh);
+    }
+    const dctx = dc.getContext('2d');
+    if (!dctx) return;
+
+    dctx.clearRect(0, 0, dc.width, dc.height);
+    dctx.fillStyle = 'rgba(2, 6, 18, 0.90)';
+    dctx.fillRect(0, 0, dc.width, dc.height);
+
+    dctx.save();
+    dctx.globalCompositeOperation = 'destination-out';
+    const toScreenX = (wx: number) => vw / 2 + (wx - cam.x) * cam.zoom;
+    const toScreenY = (wy: number) => vh / 2 + (wy - cam.y) * cam.zoom;
+
+    const punch = (wx: number, wy: number, r: number) => {
+      const sx = toScreenX(wx);
+      const sy = toScreenY(wy);
+      const sr = r * cam.zoom;
+      if (sx + sr < 0 || sx - sr > vw || sy + sr < 0 || sy - sr > vh) return;
+      const g = dctx.createRadialGradient(sx, sy, sr * 0.15, sx, sy, sr);
+      g.addColorStop(0, 'rgba(0,0,0,1)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      dctx.fillStyle = g;
+      dctx.beginPath();
+      dctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      dctx.fill();
+    };
+
+    for (const f of fighters) {
+      if (!f.alive) continue;
+      const r = f.muzzleFlashTimer > 0 ? 190 : f.jetpacking ? 160 : 125;
+      punch(f.x, f.y - 6, r);
+    }
+    for (const p of projectiles) {
+      punch(p.x, p.y, 48);
+    }
+    for (const pt of extra.portals || []) {
+      punch(pt.aX, pt.aY, 90);
+      punch(pt.bX, pt.bY, 90);
+    }
+    if (extra.airdrop?.active) {
+      punch(extra.airdrop.x, extra.airdrop.y, 120);
+    }
+    dctx.restore();
+
+    ctx.drawImage(dc, vx, vy);
   }
 }
